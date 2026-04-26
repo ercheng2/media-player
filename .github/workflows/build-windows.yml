@@ -24,7 +24,7 @@ jobs:
     
     - name: Build EXE
       run: |
-        pyinstaller --onefile --windowed --name "media-player" --add-data "icon.png;." media_player.py
+        pyinstaller --onefile --windowed --name "media-player" main.py
     
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
