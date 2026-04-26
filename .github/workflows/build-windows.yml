@@ -29,19 +29,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Build EXE with VLC
+    - name: Build EXE with VLC and Icon
       run: |
         $vlcPath = "C:\Program Files\VideoLAN\VLC"
-        pyinstaller --onefile --windowed --name "media-player" `
+        pyinstaller --onefile --windowed --name "media-player" --icon "Kunzhancheng.ico" `
           --add-binary "$vlcPath\libvlc.dll;vlc" `
           --add-binary "$vlcPath\libvlccore.dll;vlc" `
           --add-data "$vlcPath\plugins;vlc\plugins" `
+          --add-data "Kunzhancheng.ico;." `
           main.py
     
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v2.0
+        tag_name: v2.1
         files: dist/media-player.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
