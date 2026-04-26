@@ -23,18 +23,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Download VLC
-      run: |
-        Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.20/win64/vlc-3.0.20-win64.zip" -OutFile "vlc.zip"
-        Expand-Archive -Path "vlc.zip" -DestinationPath "vlc"
-        $vlcPath = (Get-ChildItem -Path "vlc" -Filter "vlc.exe" -Recurse).FullName
-        $vlcDir = Split-Path $vlcPath -Parent
-        echo "VLC_PATH=$vlcDir" >> $env:GITHUB_ENV
-      shell: powershell
-    
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "坤展成中控播放器" --add-data "vlc;vlc" --hidden-import "PyQt5" --hidden-import "vlc" --hidden-import "serial" --hidden-import "serial.tools" --hidden-import "serial.tools.list_ports" main.py
+        pyinstaller --onefile --windowed --name "坤展成中控播放器" --hidden-import "PyQt5" --hidden-import "vlc" --hidden-import "serial" --hidden-import "serial.tools" --hidden-import "serial.tools.list_ports" main.py
       shell: powershell
     
     - name: Upload EXE artifact
