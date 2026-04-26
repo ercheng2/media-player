@@ -1,0 +1,11 @@
+
+# PyInstaller打包后设置VLC路径
+if getattr(sys, 'frozen', False):
+    bundle_dir = sys._MEIPASS
+    vlc_path = os.path.join(bundle_dir, 'vlc')
+    if os.path.exists(vlc_path):
+        os.environ['PYTHON_VLC_MODULE_PATH'] = vlc_path
+        os.environ['PATH'] = vlc_path + os.pathsep + os.environ.get('PATH', '')
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(vlc_path)
+
