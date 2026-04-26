@@ -1754,8 +1754,12 @@ class MainWindow(QMainWindow):
                 window.clicked.connect(self.on_video_window_clicked)
                 self.video_windows[self.current_window_id] = window
                 
-                # 设置媒体文件
-                files = [self.media_list.item(i).text() for i in range(self.media_list.count())]
+                # 从配置加载该窗口保存的媒体文件
+                saved_files = self.config_manager.get_window_media_files(self.current_window_id)
+                window.set_media_files(saved_files)
+                
+                # 更新主界面显示
+                self.update_media_list_display()
                 window.set_media_files(files)
                 
                 # 设置音量
@@ -1788,26 +1792,35 @@ class MainWindow(QMainWindow):
         )
         
         if files:
-            # 添加到当前窗口的独立列表
+            # 获取当前窗口已有的媒体列表
             if self.current_window_id in self.video_windows:
                 window = self.video_windows[self.current_window_id]
-                for file_path in files:
-                    if file_path not in window.media_files:
-                        window.add_media_file(file_path)
+                existing_files = window.media_files
             else:
-                # 窗口未打开时，先添加到窗口1的列表
-                if 1 not in self.video_windows:
-                    self.current_window_id = 1
-                window = self.video_windows.get(self.current_window_id)
-                if window:
-                    for file_path in files:
-                        if file_path not in window.media_files:
-                            window.add_media_file(file_path)
+                # 窗口未打开时，从配置加载已有列表
+                existing_files = self.config_manager.get_window_media_files(self.current_window_id)
+            
+            # 添加新文件
+            added_count = 0
+            for file_path in files:
+                if file_path not in existing_files:
+                    existing_files.append(file_path)
+                    added_count += 1
+            
+            # 更新窗口和配置
+            if self.current_window_id in self.video_windows:
+                self.video_windows[self.current_window_id].media_files = existing_files
+            
+            # 直接保存到配置
+            self.config_manager.set_window_media_files(self.current_window_id, existing_files)
             
             # 更新显示
             self.update_media_list_display()
             
-            self.log(f"已添加 {len(files)} 个文件")
+            # 保存配置到文件
+            self.config_manager.save_config()
+            
+            self.log(f"已添加 {added_count} 个文件到窗口{self.current_window_id}")
     
     def update_media_list_display(self):
         """更新媒体列表显示（显示当前窗口的列表）"""
@@ -1816,14 +1829,18 @@ class MainWindow(QMainWindow):
         
         # 获取当前窗口的媒体列表
         if self.current_window_id in self.video_windows:
-            window = self.video_windows[self.current_window_id]
-            for file_path in window.media_files:
-                # 添加到列表
-                item = QListWidgetItem(file_path)
-                self.media_list.addItem(item)
-                # 添加到下拉框
-                file_name = os.path.basename(file_path)
-                self.media_combo.addItem(file_name, file_path)
+            media_files = self.video_windows[self.current_window_id].media_files
+        else:
+            # 窗口未打开时，从配置加载
+            media_files = self.config_manager.get_window_media_files(self.current_window_id)
+        
+        for file_path in media_files:
+            # 添加到列表
+            item = QListWidgetItem(file_path)
+            self.media_list.addItem(item)
+            # 添加到下拉框
+            file_name = os.path.basename(file_path)
+            self.media_combo.addItem(file_name, file_path)
     
     def play_selected_media(self, item):
         """播放选中的媒体"""
