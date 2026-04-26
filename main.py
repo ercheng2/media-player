@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京方桑兄弟科技有限公司
 联系方式：18210234280
-版本：v2.1 - 基于v1.0.3优化，新增窗口独立媒体列表、广播控制、配置保存功能
+版本：v2.2 - 修复图标路径和配置保存/加载问题
 """
 
 import sys
@@ -76,7 +76,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.1"
+APP_VERSION = "v2.2"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -95,13 +95,35 @@ MACHINE_CODE_FILE = "machine_code.dat"
 CONFIG_FILE = "player_config.json"
 
 
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径，兼容PyInstaller打包"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller打包后的路径
+        base_path = sys._MEIPASS
+    else:
+        # 开发环境路径
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
+def get_config_path(filename):
+    """获取配置文件的绝对路径，兼容PyInstaller打包"""
+    if getattr(sys, 'frozen', False):
+        # 打包后，配置放在exe同级目录
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, filename)
+
+
 # ============== 配置管理类 ==============
 
 class ConfigManager:
     """配置管理类 - 启动时加载，退出时保存"""
     
     def __init__(self):
-        self.config_file = CONFIG_FILE
+        # 使用正确的配置文件路径（兼容打包后）
+        self.config_file = get_config_path(CONFIG_FILE)
         self.config = self._get_default_config()
         
     def _get_default_config(self):
@@ -2152,11 +2174,12 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(COMPANY_NAME)
     
-    # 设置应用图标
-    icon_path = "Kunzhancheng.ico"
+    # 设置应用图标（使用正确路径，兼容PyInstaller打包）
+    icon_path = get_resource_path("Kunzhancheng.ico")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     else:
+        print(f"图标文件未找到: {icon_path}")
         try:
             app.setWindowIcon(QIcon.fromTheme("media-player"))
         except:
