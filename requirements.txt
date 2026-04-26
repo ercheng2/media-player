@@ -1,0 +1,4 @@
+PyQt5>=5.15.0
+python-vlc>=3.0.0
+pyinstaller>=5.0.0
+pyserial>=3.5
