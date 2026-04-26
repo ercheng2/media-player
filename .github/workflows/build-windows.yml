@@ -21,16 +21,17 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pyinstaller
+        pip install PyQt5 python-vlc pyserial
     
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "坤展成中控播放器" --hidden-import "PyQt5" --hidden-import "vlc" --hidden-import "serial" --hidden-import "serial.tools" --hidden-import "serial.tools.list_ports" main.py
-      shell: powershell
+        pyinstaller --onefile --windowed --name "media-player" --hidden-import "PyQt5" --hidden-import "vlc" --hidden-import "serial" --hidden-import "serial.tools" --hidden-import "serial.tools.list_ports" main.py
+      shell: cmd
     
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-exe
-        path: dist/坤展成中控播放器.exe
+        path: dist/media-player.exe
         retention-days: 30
