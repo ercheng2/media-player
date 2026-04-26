@@ -1760,7 +1760,6 @@ class MainWindow(QMainWindow):
                 
                 # 更新主界面显示
                 self.update_media_list_display()
-                window.set_media_files(files)
                 
                 # 设置音量
                 window.set_volume(self.volume_slider.value())
