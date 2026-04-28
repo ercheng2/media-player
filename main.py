@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.14"
+APP_VERSION = "v2.15"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -1426,8 +1426,11 @@ class MainWindow(QMainWindow):
         window_group.setLayout(window_layout)
         layout.addWidget(window_group)
         
-        # ===== 媒体列表 =====
-        media_group = QGroupBox("媒体列表")
+        # ===== 媒体列表（跟随当前窗口）=====
+        self.media_group_title = "窗口{self.current_window_id} 媒体列表"
+        media_group = QGroupBox("窗口1 媒体列表")
+        media_group.setObjectName("media_group")
+        self.media_group = media_group
         media_layout = QVBoxLayout()
         
         self.media_list = QListWidget()
@@ -1467,8 +1470,10 @@ class MainWindow(QMainWindow):
         media_group.setLayout(media_layout)
         layout.addWidget(media_group)
         
-        # ===== 播放控制 =====
-        control_group = QGroupBox("手动控制（发送到当前窗口）")
+        # ===== 播放控制（跟随当前窗口）=====
+        control_group = QGroupBox("播放控制 → 窗口1")
+        control_group.setObjectName("control_group")
+        self.control_group = control_group
         control_layout = QHBoxLayout()
         
         self.play_btn = QPushButton("▶ 播放")
@@ -1852,6 +1857,12 @@ class MainWindow(QMainWindow):
         
         # 更新媒体列表显示（显示当前窗口的媒体列表）
         self.update_media_list_display()
+        
+        # 更新媒体列表标题，显示当前窗口
+        self.media_group.setTitle(f"窗口{window_id} 媒体列表")
+        
+        # 更新播放控制标题
+        self.control_group.setTitle(f"播放控制 → 窗口{window_id}")
         
         # 更新自动打开复选框状态
         auto_open = self.config_manager.get_window_auto_open(window_id)
