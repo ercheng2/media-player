@@ -3,11 +3,23 @@
 坤展成-中控多窗口播放器
 开发公司：北京方桑兄弟科技有限公司
 联系方式：18210234280
-版本：v1.0
+版本：v2.2 - 修复图标路径和配置保存/加载问题
 """
 
 import sys
 import os
+import uuid
+
+# PyInstaller打包后设置VLC路径
+if getattr(sys, 'frozen', False):
+    bundle_dir = sys._MEIPASS
+    vlc_path = os.path.join(bundle_dir, 'vlc')
+    if os.path.exists(vlc_path):
+        os.environ['PYTHON_VLC_MODULE_PATH'] = vlc_path
+        os.environ['PATH'] = vlc_path + os.pathsep + os.environ.get('PATH', '')
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(vlc_path)
+
 import socket
 import struct
 import threading
@@ -64,7 +76,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.6"
+APP_VERSION = "v2.2"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -78,6 +90,148 @@ WINDOW_TCP_PORTS = [8892, 8893, 8894, 8895]
 TRIAL_DAYS = 30
 LICENSE_FILE = "license.dat"
 MACHINE_CODE_FILE = "machine_code.dat"
+
+# 配置文件路径
+CONFIG_FILE = "player_config.json"
+
+
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径，兼容PyInstaller打包"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller打包后的路径
+        base_path = sys._MEIPASS
+    else:
+        # 开发环境路径
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
+def get_config_path(filename):
+    """获取配置文件的绝对路径，兼容PyInstaller打包"""
+    if getattr(sys, 'frozen', False):
+        # 打包后，配置放在exe同级目录
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, filename)
+
+
+# ============== 配置管理类 ==============
+
+class ConfigManager:
+    """配置管理类 - 启动时加载，退出时保存"""
+    
+    def __init__(self):
+        # 使用正确的配置文件路径（兼容打包后）
+        self.config_file = get_config_path(CONFIG_FILE)
+        self.config = self._get_default_config()
+        
+    def _get_default_config(self):
+        """获取默认配置"""
+        return {
+            "main_window": {
+                "x": 100, "y": 100, "width": 1100, "height": 800
+            },
+            "global_volume": 80,
+            "windows": {}  # 各窗口的独立配置
+        }
+    
+    def load_config(self):
+        """加载配置"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    # 合并加载的配置和默认配置
+                    self.config = self._merge_configs(self._get_default_config(), loaded)
+                    print(f"配置已加载: {self.config_file}")
+                    return True
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+        return False
+    
+    def save_config(self):
+        """保存配置"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"保存配置失败: {e}")
+            return False
+    
+    def _merge_configs(self, default, loaded):
+        """合并配置"""
+        for key, value in loaded.items():
+            if key in default and isinstance(default[key], dict) and isinstance(value, dict):
+                default[key] = self._merge_configs(default[key], value)
+            else:
+                default[key] = value
+        return default
+    
+    def get_main_window_geometry(self):
+        """获取主窗口几何信息"""
+        return self.config.get("main_window", {})
+    
+    def set_main_window_geometry(self, x, y, width, height):
+        """设置主窗口几何信息"""
+        self.config["main_window"] = {"x": x, "y": y, "width": width, "height": height}
+    
+    def get_global_volume(self):
+        """获取全局音量"""
+        return self.config.get("global_volume", 80)
+    
+    def set_global_volume(self, volume):
+        """设置全局音量"""
+        self.config["global_volume"] = volume
+    
+    def get_window_media_files(self, window_id):
+        """获取指定窗口的媒体文件列表"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("media_files", [])
+    
+    def set_window_media_files(self, window_id, media_files):
+        """设置指定窗口的媒体文件列表"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["media_files"] = media_files
+    
+    def get_window_position(self, window_id):
+        """获取窗口位置"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("position", {"x": 100, "y": 100, "width": 800, "height": 600})
+    
+    def set_window_position(self, window_id, x, y, width, height):
+        """设置窗口位置"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["position"] = {"x": x, "y": y, "width": width, "height": height}
+    
+    def get_window_auto_open(self, window_id):
+        """获取窗口是否自动打开"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("auto_open", False)
+    
+    def set_window_auto_open(self, window_id, auto_open):
+        """设置窗口是否自动打开"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["auto_open"] = auto_open
+    
+    def get_window_default_media(self, window_id):
+        """获取窗口默认播放的媒体"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("default_media", "")
+    
+    def set_window_default_media(self, window_id, media_path):
+        """设置窗口默认播放的媒体"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["default_media"] = media_path
 
 
 # ============== 机器码和授权管理 ==============
@@ -301,8 +455,8 @@ class VideoWindow(QFrame):
     def init_player(self):
         """初始化播放器"""
         if VLC_AVAILABLE:
-            # VLC播放器 - 添加参数支持视频拉伸
-            self.vlc_instance = vlc.Instance('--no-video-title-show')
+            # VLC播放器
+            self.vlc_instance = vlc.Instance()
             self.vlc_player = self.vlc_instance.media_player_new()
             self.vlc_player.set_hwnd(int(self.winId()))
             self.use_vlc = True
@@ -347,8 +501,6 @@ class VideoWindow(QFrame):
         try:
             if self.use_vlc:
                 media = self.vlc_instance.media_new(file_path)
-                # 添加选项让视频拉伸填充窗口（忽略原始比例）
-                media.add_option(':no-keep-aspect-ratio')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
                 self.is_playing = True
@@ -962,6 +1114,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # 初始化配置管理器
+        self.config_manager = ConfigManager()
+        self.config_manager.load_config()
+        
         # 窗口设置
         self.is_minimized_to_tray = False
         self.video_windows = {}  # {window_id: VideoWindow}
@@ -985,6 +1141,9 @@ class MainWindow(QMainWindow):
         
         # 注册全局快捷键
         self.register_global_hotkeys()
+        
+        # 加载配置
+        self.apply_config()
         
     def init_ui(self):
         """初始化UI"""
@@ -1202,10 +1361,28 @@ class MainWindow(QMainWindow):
         add_btn.clicked.connect(self.add_media_file)
         btn_row.addWidget(add_btn)
         
+        remove_btn = QPushButton("移除选中")
+        remove_btn.clicked.connect(self.remove_selected_media)
+        btn_row.addWidget(remove_btn)
+        media_layout.addLayout(btn_row)
+        
+        # 设置行
+        setting_row = QHBoxLayout()
+        
+        self.set_default_btn = QPushButton("设为默认播放")
+        self.set_default_btn.clicked.connect(self.set_default_media)
+        setting_row.addWidget(self.set_default_btn)
+        
+        self.auto_open_cb = QCheckBox("自动打开此窗口")
+        self.auto_open_cb.stateChanged.connect(self.toggle_auto_open)
+        setting_row.addWidget(self.auto_open_cb)
+        
+        media_layout.addLayout(setting_row)
+        
+        # 打开窗口按钮
         self.open_window_btn = QPushButton("打开窗口1")
         self.open_window_btn.clicked.connect(self.open_current_window)
-        btn_row.addWidget(self.open_window_btn)
-        media_layout.addLayout(btn_row)
+        media_layout.addWidget(self.open_window_btn)
         
         media_group.setLayout(media_layout)
         layout.addWidget(media_group)
@@ -1333,25 +1510,37 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         widget.setLayout(layout)
         
-        # ===== 广播控制 =====
+        # ===== 广播控制全部窗口 =====
         broadcast_group = QGroupBox("广播控制全部")
         broadcast_layout = QVBoxLayout()
         
-        # UDP广播
-        udp_layout = QHBoxLayout()
-        udp_layout.addWidget(QLabel(f"UDP {UDP_BROADCAST_PORT}"))
-        udp_broadcast_btn = QPushButton("广播UDP")
-        udp_broadcast_btn.clicked.connect(lambda: self.broadcast_command("udp", ""))
-        udp_layout.addWidget(udp_broadcast_btn)
-        broadcast_layout.addLayout(udp_layout)
+        # 广播控制按钮行
+        broadcast_btn_row = QHBoxLayout()
         
-        # TCP广播
-        tcp_layout = QHBoxLayout()
-        tcp_layout.addWidget(QLabel(f"TCP {TCP_BROADCAST_PORT}"))
-        tcp_broadcast_btn = QPushButton("广播TCP")
-        tcp_broadcast_btn.clicked.connect(lambda: self.broadcast_command("tcp", ""))
-        tcp_layout.addWidget(tcp_broadcast_btn)
-        broadcast_layout.addLayout(tcp_layout)
+        play_all_btn = QPushButton("▶全部播放")
+        play_all_btn.setStyleSheet("background-color: #28a745; min-height: 32px;")
+        play_all_btn.clicked.connect(self.broadcast_play_all)
+        broadcast_btn_row.addWidget(play_all_btn)
+        
+        pause_all_btn = QPushButton("⏸全部暂停")
+        pause_all_btn.setStyleSheet("background-color: #ffc107; min-height: 32px;")
+        pause_all_btn.clicked.connect(self.broadcast_pause_all)
+        broadcast_btn_row.addWidget(pause_all_btn)
+        
+        broadcast_layout.addLayout(broadcast_btn_row)
+        
+        broadcast_btn_row2 = QHBoxLayout()
+        
+        stop_all_btn = QPushButton("⏹全部停止")
+        stop_all_btn.setStyleSheet("background-color: #dc3545; color: white; min-height: 32px;")
+        stop_all_btn.clicked.connect(self.broadcast_stop_all)
+        broadcast_btn_row2.addWidget(stop_all_btn)
+        
+        replay_all_btn = QPushButton("🔄全部重播")
+        replay_all_btn.clicked.connect(self.broadcast_replay_all)
+        broadcast_btn_row2.addWidget(replay_all_btn)
+        
+        broadcast_layout.addLayout(broadcast_btn_row2)
         
         broadcast_group.setLayout(broadcast_layout)
         layout.addWidget(broadcast_group)
@@ -1491,7 +1680,6 @@ class MainWindow(QMainWindow):
         # 记录上一个状态
         self.last_pageup_state = False
         self.last_pagedown_state = False
-        self.last_v_state = False
     
     def check_hotkeys(self):
         """检查全局快捷键"""
@@ -1500,7 +1688,6 @@ class MainWindow(QMainWindow):
             from ctypes import windll
             VK_PRIOR = 0x21  # PageUp
             VK_NEXT = 0x22   # PageDown
-            VK_V = 0x56      # V键
             
             # 检查PageUp
             pageup_state = windll.user32.GetAsyncKeyState(VK_PRIOR) & 0x8000
@@ -1513,12 +1700,6 @@ class MainWindow(QMainWindow):
             if pagedown_state and not self.last_pagedown_state:
                 self.toggle_current_window_lock()
             self.last_pagedown_state = pagedown_state
-            
-            # 检查V键
-            v_state = windll.user32.GetAsyncKeyState(VK_V) & 0x8000
-            if v_state and not self.last_v_state:
-                self.toggle_current_window_lock()
-            self.last_v_state = v_state
         except:
             pass
     
@@ -1580,6 +1761,15 @@ class MainWindow(QMainWindow):
             self.y_spin.blockSignals(False)
             self.width_spin.blockSignals(False)
             self.height_spin.blockSignals(False)
+        
+        # 更新媒体列表显示（显示当前窗口的媒体列表）
+        self.update_media_list_display()
+        
+        # 更新自动打开复选框状态
+        auto_open = self.config_manager.get_window_auto_open(window_id)
+        self.auto_open_cb.blockSignals(True)
+        self.auto_open_cb.setChecked(auto_open)
+        self.auto_open_cb.blockSignals(False)
     
     def on_position_changed(self):
         """位置设置改变"""
@@ -1624,9 +1814,12 @@ class MainWindow(QMainWindow):
                 window.clicked.connect(self.on_video_window_clicked)
                 self.video_windows[self.current_window_id] = window
                 
-                # 设置媒体文件
-                files = [self.media_list.item(i).text() for i in range(self.media_list.count())]
-                window.set_media_files(files)
+                # 从配置加载该窗口保存的媒体文件
+                saved_files = self.config_manager.get_window_media_files(self.current_window_id)
+                window.set_media_files(saved_files)
+                
+                # 更新主界面显示
+                self.update_media_list_display()
                 
                 # 设置音量
                 window.set_volume(self.volume_slider.value())
@@ -1658,28 +1851,116 @@ class MainWindow(QMainWindow):
         )
         
         if files:
-            for file_path in files:
-                # 检查是否已存在
-                items = [self.media_list.item(i).text() for i in range(self.media_list.count())]
-                if file_path not in items:
-                    # 添加到列表
-                    item = QListWidgetItem(file_path)
-                    self.media_list.addItem(item)
-                    
-                    # 添加到下拉框
-                    file_name = os.path.basename(file_path)
-                    self.media_combo.addItem(file_name, file_path)
-                
-                # 添加到当前窗口
-                if self.current_window_id in self.video_windows:
-                    self.video_windows[self.current_window_id].add_media_file(file_path)
+            # 获取当前窗口已有的媒体列表
+            if self.current_window_id in self.video_windows:
+                window = self.video_windows[self.current_window_id]
+                existing_files = window.media_files
+            else:
+                # 窗口未打开时，从配置加载已有列表
+                existing_files = self.config_manager.get_window_media_files(self.current_window_id)
             
-            self.log(f"已添加 {len(files)} 个文件")
+            # 添加新文件
+            added_count = 0
+            for file_path in files:
+                if file_path not in existing_files:
+                    existing_files.append(file_path)
+                    added_count += 1
+            
+            # 更新窗口和配置
+            if self.current_window_id in self.video_windows:
+                self.video_windows[self.current_window_id].media_files = existing_files
+            
+            # 直接保存到配置
+            self.config_manager.set_window_media_files(self.current_window_id, existing_files)
+            
+            # 更新显示
+            self.update_media_list_display()
+            
+            # 保存配置到文件
+            self.config_manager.save_config()
+            
+            self.log(f"已添加 {added_count} 个文件到窗口{self.current_window_id}")
+    
+    def update_media_list_display(self):
+        """更新媒体列表显示（显示当前窗口的列表）"""
+        self.media_list.clear()
+        self.media_combo.clear()
+        
+        # 获取当前窗口的媒体列表
+        if self.current_window_id in self.video_windows:
+            media_files = self.video_windows[self.current_window_id].media_files
+        else:
+            # 窗口未打开时，从配置加载
+            media_files = self.config_manager.get_window_media_files(self.current_window_id)
+        
+        # 获取默认播放的媒体
+        default_media = self.config_manager.get_window_default_media(self.current_window_id)
+        
+        for file_path in media_files:
+            # 添加到列表
+            file_name = os.path.basename(file_path)
+            if file_path == default_media:
+                # 默认播放的媒体用特殊标记
+                item = QListWidgetItem(f"★ {file_name} (默认)")
+                item.setForeground(QColor("#4CAF50"))
+            else:
+                item = QListWidgetItem(file_name)
+            item.setData(Qt.UserRole, file_path)  # 存储完整路径
+            self.media_list.addItem(item)
+            # 添加到下拉框
+            self.media_combo.addItem(file_name, file_path)
     
     def play_selected_media(self, item):
         """播放选中的媒体"""
-        file_path = item.text()
+        file_path = item.data(Qt.UserRole)  # 获取完整路径
         self.play_media(file_path)
+    
+    def remove_selected_media(self):
+        """移除选中的媒体"""
+        current_item = self.media_list.currentItem()
+        if current_item:
+            file_path = current_item.data(Qt.UserRole)  # 获取完整路径
+            
+            # 从窗口列表中移除
+            if self.current_window_id in self.video_windows:
+                window = self.video_windows[self.current_window_id]
+                if file_path in window.media_files:
+                    window.media_files.remove(file_path)
+            
+            # 从配置中移除
+            media_files = self.config_manager.get_window_media_files(self.current_window_id)
+            if file_path in media_files:
+                media_files.remove(file_path)
+                self.config_manager.set_window_media_files(self.current_window_id, media_files)
+            
+            # 如果移除的是默认播放，清除默认
+            if self.config_manager.get_window_default_media(self.current_window_id) == file_path:
+                self.config_manager.set_window_default_media(self.current_window_id, "")
+            
+            self.config_manager.save_config()
+            self.update_media_list_display()
+            self.log(f"已移除: {os.path.basename(file_path)}")
+    
+    def set_default_media(self):
+        """设置默认播放的媒体"""
+        current_item = self.media_list.currentItem()
+        if current_item:
+            file_path = current_item.data(Qt.UserRole)  # 获取完整路径
+            self.config_manager.set_window_default_media(self.current_window_id, file_path)
+            self.config_manager.save_config()
+            
+            # 更新显示
+            self.update_media_list_display()
+            self.log(f"窗口{self.current_window_id}默认播放已设置: {os.path.basename(file_path)}")
+    
+    def toggle_auto_open(self, state):
+        """切换窗口自动打开"""
+        auto_open = state == Qt.Checked
+        self.config_manager.set_window_auto_open(self.current_window_id, auto_open)
+        self.config_manager.save_config()
+        
+        status = "开启" if auto_open else "关闭"
+        self.log(f"窗口{self.current_window_id}自动打开已{status}")
     
     def play_media(self, file_path):
         """播放指定媒体"""
@@ -1863,6 +2144,33 @@ class MainWindow(QMainWindow):
             self.network_manager.send_tcp(command, target_ip, port)
             self.log(f"TCP广播 -> {target_ip}:{port}")
     
+    def broadcast_play_all(self):
+        """广播控制 - 全部播放"""
+        for window_id, window in self.video_windows.items():
+            if window.media_files:
+                if window.current_index < 0:
+                    window.current_index = 0
+                window.play()
+                self.log(f"窗口{window_id}播放")
+    
+    def broadcast_pause_all(self):
+        """广播控制 - 全部暂停"""
+        for window_id, window in self.video_windows.items():
+            window.pause()
+            self.log(f"窗口{window_id}暂停")
+    
+    def broadcast_stop_all(self):
+        """广播控制 - 全部停止"""
+        for window_id, window in self.video_windows.items():
+            window.stop()
+            self.log(f"窗口{window_id}停止")
+    
+    def broadcast_replay_all(self):
+        """广播控制 - 全部重播"""
+        for window_id, window in self.video_windows.items():
+            window.replay()
+            self.log(f"窗口{window_id}重播")
+    
     def toggle_main_window(self):
         """切换主窗口显示"""
         if self.isVisible():
@@ -1911,6 +2219,9 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.Yes:
+            # 保存配置
+            self.save_config()
+            
             # 关闭所有视频窗口
             for window in list(self.video_windows.values()):
                 window.close()
@@ -1929,6 +2240,9 @@ class MainWindow(QMainWindow):
     
     def quit_application(self):
         """退出应用"""
+        # 保存配置
+        self.save_config()
+        
         # 关闭所有视频窗口
         for window in list(self.video_windows.values()):
             window.close()
@@ -1942,6 +2256,81 @@ class MainWindow(QMainWindow):
         self.tray_icon.hide()
         
         QApplication.quit()
+    
+    def save_config(self):
+        """保存配置"""
+        # 保存主窗口几何
+        geometry = self.geometry()
+        self.config_manager.set_main_window_geometry(
+            geometry.x(), geometry.y(), geometry.width(), geometry.height()
+        )
+        
+        # 保存各窗口的媒体列表和位置
+        for window_id, window in self.video_windows.items():
+            self.config_manager.set_window_media_files(window_id, window.media_files)
+            # 保存窗口位置
+            pos = window.pos()
+            size = window.size()
+            self.config_manager.set_window_position(window_id, pos.x(), pos.y(), size.width(), size.height())
+        
+        # 保存音量
+        self.config_manager.set_global_volume(self.volume_slider.value())
+        
+        # 保存到文件
+        self.config_manager.save_config()
+        print("配置已保存")
+    
+    def apply_config(self):
+        """应用加载的配置"""
+        # 应用主窗口几何
+        geometry = self.config_manager.get_main_window_geometry()
+        if geometry:
+            self.setGeometry(
+                geometry.get("x", 100),
+                geometry.get("y", 100),
+                geometry.get("width", 1100),
+                geometry.get("height", 800)
+            )
+        
+        # 应用音量
+        volume = self.config_manager.get_global_volume()
+        self.volume_slider.setValue(volume)
+        
+        # 自动打开配置的窗口
+        self._auto_open_windows()
+        
+        print("配置已应用")
+    
+    def _auto_open_windows(self):
+        """自动打开配置为自动打开的窗口"""
+        for window_id in range(1, 5):
+            if self.config_manager.get_window_auto_open(window_id):
+                # 获取窗口位置
+                pos = self.config_manager.get_window_position(window_id)
+                # 获取媒体列表
+                media_files = self.config_manager.get_window_media_files(window_id)
+                # 获取默认播放
+                default_media = self.config_manager.get_window_default_media(window_id)
+                
+                if media_files:
+                    # 创建窗口
+                    window = VideoWindow(window_id)
+                    window.clicked.connect(self.on_video_window_clicked)
+                    window.set_media_files(media_files)
+                    window.set_volume(self.volume_slider.value())
+                    window.set_position(pos.get("x", 100), pos.get("y", 100), 
+                                        pos.get("width", 800), pos.get("height", 600))
+                    window.show()
+                    
+                    self.video_windows[window_id] = window
+                    
+                    # 自动播放默认媒体
+                    if default_media and default_media in media_files:
+                        window.play(default_media)
+                    elif media_files:
+                        window.play(media_files[0])
+                    
+                    self.log(f"窗口{window_id}已自动打开")
 
 
 # ============== 程序入口 ==============
@@ -1955,14 +2344,23 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(COMPANY_NAME)
     
-    # 设置应用图标
-    try:
-        app.setWindowIcon(QIcon.fromTheme("media-player"))
-    except:
-        pass
+    # 设置应用图标（使用正确路径，兼容PyInstaller打包）
+    icon_path = get_resource_path("Kunzhancheng.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+    else:
+        print(f"图标文件未找到: {icon_path}")
+        try:
+            app.setWindowIcon(QIcon.fromTheme("media-player"))
+        except:
+            pass
     
     # 创建并显示主窗口
     window = MainWindow()
+    
+    # 设置主窗口图标
+    if os.path.exists(icon_path):
+        window.setWindowIcon(QIcon(icon_path))
     
     # 检查启动时最小化
     # 注意：这里不自动最小化，首次运行时显示主窗口
@@ -1974,3 +2372,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -2,51 +2,47 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.9'
+    
+    - name: Install VLC
+      run: |
+        choco install vlc -y
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Download VLC
+    - name: Build EXE with VLC and Icon
       run: |
-        Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.20/win64/vlc-3.0.20-win64.zip" -OutFile "vlc.zip"
-        Expand-Archive -Path "vlc.zip" -DestinationPath "vlc"
-        $vlcPath = (Get-ChildItem -Path "vlc" -Filter "vlc.exe" -Recurse).FullName
-        $vlcDir = Split-Path $vlcPath -Parent
-        echo "VLC_PATH=$vlcDir" >> $env:GITHUB_ENV
-      shell: powershell
-    
-    - name: Build EXE with PyInstaller
-      run: |
-        pyinstaller --onefile --windowed --name "坤展成中控播放器" `
-          --add-data "vlc;vlc" `
-          --hidden-import "PyQt5" `
-          --hidden-import "vlc" `
-          --hidden-import "serial" `
-          --hidden-import "serial.tools" `
-          --hidden-import "serial.tools.list_ports" `
+        $vlcPath = "C:\Program Files\VideoLAN\VLC"
+        pyinstaller --onefile --windowed --name "media-player" --icon "Kunzhancheng.ico" `
+          --add-binary "$vlcPath\libvlc.dll;vlc" `
+          --add-binary "$vlcPath\libvlccore.dll;vlc" `
+          --add-data "$vlcPath\plugins;vlc\plugins" `
+          --add-data "Kunzhancheng.ico;." `
           main.py
-      shell: powershell
     
-    - name: Upload EXE artifact
-      uses: actions/upload-artifact@v4
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v1
       with:
-        name: windows-exe
-        path: dist/坤展成中控播放器.exe
-        retention-days: 30
+        tag_name: v2.5
+        files: dist/media-player.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
