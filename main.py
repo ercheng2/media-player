@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.23"
+APP_VERSION = "v2.24"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -427,6 +427,7 @@ class VideoWindow(QFrame):
         self.is_playing = False
         self.volume = 80
         self.is_muted = False
+        self.loop_play = False  # 循环播放标志
         
         # 初始化UI
         self.init_ui()
@@ -472,15 +473,16 @@ class VideoWindow(QFrame):
     
     def eventFilter(self, obj, event):
         """事件过滤器，将video_frame的鼠标事件转发给父窗口"""
+        from PyQt5.QtCore import QEvent
         if obj == self.video_frame:
-            if event.type() in [event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove]:
-                # 将事件转发给父窗口处理
-                if event.type() == event.MouseButtonPress:
-                    self.mousePressEvent(event)
-                elif event.type() == event.MouseButtonRelease:
-                    self.mouseReleaseEvent(event)
-                elif event.type() == event.MouseMove:
-                    self.mouseMoveEvent(event)
+            if event.type() == QEvent.MouseButtonPress:
+                self.mousePressEvent(event)
+                return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self.mouseReleaseEvent(event)
+                return True
+            elif event.type() == QEvent.MouseMove:
+                self.mouseMoveEvent(event)
                 return True
         return super().eventFilter(obj, event)
         
@@ -552,15 +554,37 @@ class VideoWindow(QFrame):
             # 渲染到video_frame控件上，而不是整个窗口
             self.vlc_player.set_hwnd(int(self.video_frame.winId()))
             self.use_vlc = True
+            
+            # 设置VLC事件管理器，监听播放结束事件
+            self.vlc_events = self.vlc_player.event_manager()
+            self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
         else:
             # PyQt5播放器
             self.media_player = QMediaPlayer()
+            self.media_player.stateChanged.connect(self._on_qt_state_changed)
             self.use_vlc = False
         
     def set_position(self, x, y, width, height):
         """设置窗口位置和大小"""
         self.move(int(x), int(y))
         self.resize(int(width), int(height))
+    
+    def _on_vlc_end_reached(self, event):
+        """VLC播放结束回调"""
+        if self.loop_play and self.is_playing:
+            # 使用QTimer在主线程中重新播放
+            QTimer.singleShot(100, self.replay)
+    
+    def _on_qt_state_changed(self, state):
+        """Qt播放器状态改变回调"""
+        from PyQt5.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.StoppedState and self.loop_play and self.is_playing:
+            QTimer.singleShot(100, self.replay)
+    
+    def toggle_loop(self):
+        """切换循环播放"""
+        self.loop_play = not self.loop_play
+        return self.loop_play
         
     def set_media_files(self, files):
         """设置媒体文件列表"""
@@ -1535,6 +1559,11 @@ class MainWindow(QMainWindow):
         self.fullscreen_btn2.clicked.connect(self.toggle_fullscreen_current)
         control_layout.addWidget(self.fullscreen_btn2)
         
+        self.loop_btn = QPushButton("🔁 循环")
+        self.loop_btn.setCheckable(True)
+        self.loop_btn.clicked.connect(self.toggle_loop_current)
+        control_layout.addWidget(self.loop_btn)
+        
         control_group.setLayout(control_layout)
         layout.addWidget(control_group)
         
@@ -2187,6 +2216,13 @@ class MainWindow(QMainWindow):
         """切换当前窗口全屏"""
         if self.current_window_id in self.video_windows:
             self.video_windows[self.current_window_id].toggle_fullscreen()
+    
+    def toggle_loop_current(self):
+        """切换当前窗口循环播放"""
+        if self.current_window_id in self.video_windows:
+            is_loop = self.video_windows[self.current_window_id].toggle_loop()
+            self.loop_btn.setChecked(is_loop)
+            self.log(f"窗口{self.current_window_id} 循环播放: {'开启' if is_loop else '关闭'}")
     
     def prev_media(self):
         """上一个媒体"""
