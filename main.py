@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.13"
+APP_VERSION = "v2.14"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -431,7 +431,7 @@ class VideoWindow(QFrame):
         
     def check_drag(self):
         """定时器检查鼠标状态，实现拖动"""
-        if platform.system() != 'Windows' or self.is_locked or not self.isVisible():
+        if platform.system() != 'Windows' or not self.isVisible():
             return
         
         try:
@@ -457,16 +457,18 @@ class VideoWindow(QFrame):
             if left_down and not self.last_left_down:
                 # 鼠标按下
                 if in_window:
-                    # 记录拖动偏移
-                    self.drag_position = global_pos - QPoint(win_x, win_y)
-                    self.is_dragging = True
+                    # 先触发clicked信号，更新current_window_id
                     self.clicked.emit(self.window_id)
-                    self.raise_()
+                    # 如果窗口未锁定，开始拖动
+                    if not self.is_locked:
+                        self.drag_position = global_pos - QPoint(win_x, win_y)
+                        self.is_dragging = True
+                        self.raise_()
             elif not left_down and self.last_left_down:
                 # 鼠标释放
                 self.is_dragging = False
                 self.drag_position = None
-            elif left_down and self.is_dragging:
+            elif left_down and self.is_dragging and not self.is_locked:
                 # 拖动中
                 new_pos = global_pos - self.drag_position
                 self.move(new_pos)
@@ -2282,27 +2284,12 @@ class MainWindow(QMainWindow):
             self.show_main_window()
     
     def toggle_current_window_lock(self):
-        """切换当前窗口锁定 - 锁定鼠标所在的窗口"""
-        from PyQt5.QtGui import QCursor
-        mouse_pos = QCursor.pos()
-        
-        # 找到鼠标所在的窗口
-        target_window_id = None
-        for wid, window in self.video_windows.items():
+        """切换当前窗口锁定 - 锁定最后点击的窗口"""
+        if self.current_window_id in self.video_windows:
+            window = self.video_windows[self.current_window_id]
             if window.isVisible():
-                win_rect = window.geometry()
-                if (win_rect.x() <= mouse_pos.x() < win_rect.x() + win_rect.width() and
-                    win_rect.y() <= mouse_pos.y() < win_rect.y() + win_rect.height()):
-                    target_window_id = wid
-                    break
-        
-        # 如果没找到鼠标所在的窗口，使用current_window_id
-        if target_window_id is None:
-            target_window_id = self.current_window_id
-        
-        if target_window_id in self.video_windows:
-            is_locked = self.video_windows[target_window_id].toggle_lock()
-            self.log(f"窗口{target_window_id} {'锁定' if is_locked else '解锁'}")
+                is_locked = window.toggle_lock()
+                self.log(f"窗口{self.current_window_id} {'锁定' if is_locked else '解锁'}")
     
     def log(self, message):
         """记录日志"""
