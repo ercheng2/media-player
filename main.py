@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.22"
+APP_VERSION = "v2.23"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -469,6 +469,20 @@ class VideoWindow(QFrame):
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
         super().mouseReleaseEvent(event)
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器，将video_frame的鼠标事件转发给父窗口"""
+        if obj == self.video_frame:
+            if event.type() in [event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove]:
+                # 将事件转发给父窗口处理
+                if event.type() == event.MouseButtonPress:
+                    self.mousePressEvent(event)
+                elif event.type() == event.MouseButtonRelease:
+                    self.mouseReleaseEvent(event)
+                elif event.type() == event.MouseMove:
+                    self.mouseMoveEvent(event)
+                return True
+        return super().eventFilter(obj, event)
         
     def init_ui(self):
         """初始化UI"""
@@ -490,8 +504,8 @@ class VideoWindow(QFrame):
         self.video_frame = QWidget(self)
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
-        # 让视频容器不拦截鼠标事件，事件穿透到父窗口
-        self.video_frame.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        # 安装事件过滤器，将鼠标事件转发给父窗口
+        self.video_frame.installEventFilter(self)
         self.video_frame.show()
         
         # 窗口编号标签（在视频上方）
