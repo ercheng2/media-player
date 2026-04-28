@@ -32,9 +32,11 @@ from datetime import datetime, timedelta
 import platform
 if platform.system() == 'Windows':
     from ctypes import windll, c_void_p, c_int, byref, Structure, POINTER
+    import ctypes.wintypes as wintypes
 else:
     windll = None
     from ctypes import c_void_p, c_int, byref, Structure, POINTER
+    wintypes = None
 
 # PyQt5 导入
 from PyQt5.QtWidgets import (
@@ -76,7 +78,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.9"
+APP_VERSION = "v2.10"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -418,6 +420,28 @@ class VideoWindow(QFrame):
         # 拖拽相关
         self.drag_position = None
         self.is_dragging = False
+        self.click_pos = None  # 记录点击位置
+        
+        # 安装全局事件过滤器
+        QApplication.instance().installEventFilter(self)
+        
+    def eventFilter(self, obj, event):
+        """全局事件过滤器，捕获鼠标事件"""
+        if event.type() == event.MouseButtonPress:
+            if event.button() == Qt.LeftButton and self.underMouse():
+                if not self.is_locked:
+                    self.click_pos = event.globalPos()
+                    self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+                    self.is_dragging = True
+                self.clicked.emit(self.window_id)
+        elif event.type() == event.MouseMove:
+            if self.is_dragging and not self.is_locked:
+                self.move(event.globalPos() - self.drag_position)
+        elif event.type() == event.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                self.is_dragging = False
+                self.drag_position = None
+        return super().eventFilter(obj, event)
         
     def init_ui(self):
         """初始化UI"""
@@ -641,6 +665,19 @@ class VideoWindow(QFrame):
         else:
             self.lock()
         return self.is_locked
+    
+    def nativeEvent(self, eventType, message):
+        """处理Windows原生消息，实现拖动"""
+        if platform.system() == 'Windows' and not self.is_locked:
+            try:
+                msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+                # WM_NCLBUTTONDOWN = 0xA1, WM_NCHITTEST = 0x84
+                if msg.message == 0x84:  # WM_NCHITTEST
+                    # 让整个窗口区域都返回HTCAPTION（标题栏），实现拖动
+                    return True, 2  # HTCAPTION = 2
+            except:
+                pass
+        return super().nativeEvent(eventType, message)
     
     def mousePressEvent(self, event):
         """鼠标按下"""
