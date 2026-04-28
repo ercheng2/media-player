@@ -64,7 +64,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v1.0"
+APP_VERSION = "v2.6"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -301,8 +301,8 @@ class VideoWindow(QFrame):
     def init_player(self):
         """初始化播放器"""
         if VLC_AVAILABLE:
-            # VLC播放器
-            self.vlc_instance = vlc.Instance()
+            # VLC播放器 - 添加参数支持视频拉伸
+            self.vlc_instance = vlc.Instance('--no-video-title-show')
             self.vlc_player = self.vlc_instance.media_player_new()
             self.vlc_player.set_hwnd(int(self.winId()))
             self.use_vlc = True
@@ -347,6 +347,8 @@ class VideoWindow(QFrame):
         try:
             if self.use_vlc:
                 media = self.vlc_instance.media_new(file_path)
+                # 添加选项让视频拉伸填充窗口（忽略原始比例）
+                media.add_option(':no-keep-aspect-ratio')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
                 self.is_playing = True
@@ -1489,6 +1491,7 @@ class MainWindow(QMainWindow):
         # 记录上一个状态
         self.last_pageup_state = False
         self.last_pagedown_state = False
+        self.last_v_state = False
     
     def check_hotkeys(self):
         """检查全局快捷键"""
@@ -1497,6 +1500,7 @@ class MainWindow(QMainWindow):
             from ctypes import windll
             VK_PRIOR = 0x21  # PageUp
             VK_NEXT = 0x22   # PageDown
+            VK_V = 0x56      # V键
             
             # 检查PageUp
             pageup_state = windll.user32.GetAsyncKeyState(VK_PRIOR) & 0x8000
@@ -1509,6 +1513,12 @@ class MainWindow(QMainWindow):
             if pagedown_state and not self.last_pagedown_state:
                 self.toggle_current_window_lock()
             self.last_pagedown_state = pagedown_state
+            
+            # 检查V键
+            v_state = windll.user32.GetAsyncKeyState(VK_V) & 0x8000
+            if v_state and not self.last_v_state:
+                self.toggle_current_window_lock()
+            self.last_v_state = v_state
         except:
             pass
     
