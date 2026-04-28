@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.12"
+APP_VERSION = "v2.13"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -2282,10 +2282,27 @@ class MainWindow(QMainWindow):
             self.show_main_window()
     
     def toggle_current_window_lock(self):
-        """切换当前窗口锁定"""
-        if self.current_window_id in self.video_windows:
-            is_locked = self.video_windows[self.current_window_id].toggle_lock()
-            self.log(f"窗口{self.current_window_id} {'锁定' if is_locked else '解锁'}")
+        """切换当前窗口锁定 - 锁定鼠标所在的窗口"""
+        from PyQt5.QtGui import QCursor
+        mouse_pos = QCursor.pos()
+        
+        # 找到鼠标所在的窗口
+        target_window_id = None
+        for wid, window in self.video_windows.items():
+            if window.isVisible():
+                win_rect = window.geometry()
+                if (win_rect.x() <= mouse_pos.x() < win_rect.x() + win_rect.width() and
+                    win_rect.y() <= mouse_pos.y() < win_rect.y() + win_rect.height()):
+                    target_window_id = wid
+                    break
+        
+        # 如果没找到鼠标所在的窗口，使用current_window_id
+        if target_window_id is None:
+            target_window_id = self.current_window_id
+        
+        if target_window_id in self.video_windows:
+            is_locked = self.video_windows[target_window_id].toggle_lock()
+            self.log(f"窗口{target_window_id} {'锁定' if is_locked else '解锁'}")
     
     def log(self, message):
         """记录日志"""
