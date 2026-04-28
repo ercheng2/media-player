@@ -30,6 +30,7 @@ import base64
 import re
 from datetime import datetime, timedelta
 import platform
+import ctypes
 if platform.system() == 'Windows':
     from ctypes import windll, c_void_p, c_int, byref, Structure, POINTER
     import ctypes.wintypes as wintypes
@@ -78,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.10"
+APP_VERSION = "v2.11"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -417,31 +418,58 @@ class VideoWindow(QFrame):
         # 初始化播放器
         self.init_player()
         
-        # 拖拽相关
+        # 拖拽相关 - 使用定时器轮询鼠标状态
         self.drag_position = None
         self.is_dragging = False
-        self.click_pos = None  # 记录点击位置
+        self.drag_timer = QTimer(self)
+        self.drag_timer.timeout.connect(self.check_drag)
+        self.drag_timer.start(16)  # 60fps
         
-        # 安装全局事件过滤器
-        QApplication.instance().installEventFilter(self)
+        # 上一次鼠标按键状态
+        self.last_left_down = False
+        self.active_window = False  # 当前窗口是否被激活
         
-    def eventFilter(self, obj, event):
-        """全局事件过滤器，捕获鼠标事件"""
-        if event.type() == event.MouseButtonPress:
-            if event.button() == Qt.LeftButton and self.underMouse():
-                if not self.is_locked:
-                    self.click_pos = event.globalPos()
-                    self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def check_drag(self):
+        """定时器检查鼠标状态，实现拖动"""
+        if platform.system() != 'Windows' or self.is_locked or not self.isVisible():
+            return
+        
+        try:
+            # 获取鼠标状态
+            left_down = windll.user32.GetAsyncKeyState(1) & 0x8000  # VK_LBUTTON
+            
+            # 获取鼠标位置
+            cursor_pos = QPoint()
+            windll.user32.GetCursorPos(ctypes.byref(ctypes.c_long(cursor_pos.rx())))
+            # 简化：直接用QCursor
+            from PyQt5.QtGui import QCursor
+            global_pos = QCursor.pos()
+            
+            # 检查鼠标是否在窗口内
+            window_rect = self.geometry()
+            local_pos = self.mapFromGlobal(global_pos)
+            in_window = self.rect().contains(local_pos)
+            
+            if left_down and not self.last_left_down:
+                # 鼠标按下
+                if in_window:
+                    self.drag_position = global_pos - window_rect.topLeft()
                     self.is_dragging = True
-                self.clicked.emit(self.window_id)
-        elif event.type() == event.MouseMove:
-            if self.is_dragging and not self.is_locked:
-                self.move(event.globalPos() - self.drag_position)
-        elif event.type() == event.MouseButtonRelease:
-            if event.button() == Qt.LeftButton:
+                    self.active_window = True
+                    self.clicked.emit(self.window_id)
+                    self.raise_()  # 将窗口置顶
+            elif not left_down and self.last_left_down:
+                # 鼠标释放
                 self.is_dragging = False
                 self.drag_position = None
-        return super().eventFilter(obj, event)
+            elif left_down and self.is_dragging:
+                # 鼠标移动（拖动中）
+                new_pos = global_pos - self.drag_position
+                self.move(new_pos)
+            
+            self.last_left_down = left_down
+        except Exception as e:
+            pass
         
     def init_ui(self):
         """初始化UI"""
@@ -665,39 +693,6 @@ class VideoWindow(QFrame):
         else:
             self.lock()
         return self.is_locked
-    
-    def nativeEvent(self, eventType, message):
-        """处理Windows原生消息，实现拖动"""
-        if platform.system() == 'Windows' and not self.is_locked:
-            try:
-                msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
-                # WM_NCLBUTTONDOWN = 0xA1, WM_NCHITTEST = 0x84
-                if msg.message == 0x84:  # WM_NCHITTEST
-                    # 让整个窗口区域都返回HTCAPTION（标题栏），实现拖动
-                    return True, 2  # HTCAPTION = 2
-            except:
-                pass
-        return super().nativeEvent(eventType, message)
-    
-    def mousePressEvent(self, event):
-        """鼠标按下"""
-        if event.button() == Qt.LeftButton:
-            if not self.is_locked:
-                self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-                self.is_dragging = True
-                event.accept()
-            self.clicked.emit(self.window_id)
-    
-    def mouseMoveEvent(self, event):
-        """鼠标移动"""
-        if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
-            self.move(event.globalPos() - self.drag_position)
-            event.accept()
-    
-    def mouseReleaseEvent(self, event):
-        """鼠标释放"""
-        self.is_dragging = False
-        self.drag_position = None
     
     def keyPressEvent(self, event):
         """按键事件"""
