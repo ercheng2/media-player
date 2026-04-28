@@ -76,7 +76,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.8"
+APP_VERSION = "v2.9"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -435,7 +435,15 @@ class VideoWindow(QFrame):
             }
         """)
         
-        # 窗口编号标签
+        # 创建视频容器（VLC渲染到这个控件上）
+        self.video_frame = QWidget(self)
+        self.video_frame.setStyleSheet("background-color: black;")
+        self.video_frame.setGeometry(0, 0, 800, 600)
+        # 让视频容器不拦截鼠标事件，事件穿透到父窗口
+        self.video_frame.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.video_frame.show()
+        
+        # 窗口编号标签（在视频上方）
         self.label_id = QLabel(f"窗口{self.window_id}", self)
         self.label_id.setStyleSheet("""
             QLabel {
@@ -447,28 +455,22 @@ class VideoWindow(QFrame):
             }
         """)
         self.label_id.move(10, 10)
+        self.label_id.raise_()  # 确保在视频上方
         self.label_id.show()
         
         # 设置初始大小和位置
         self.resize(800, 600)
-        
-        # 添加透明的鼠标事件接收层（用于拖动）
-        self.event_overlay = QWidget(self)
-        self.event_overlay.setStyleSheet("background: transparent;")
-        self.event_overlay.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.event_overlay.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.event_overlay.show()
         
         # 启用鼠标追踪，确保能接收鼠标事件
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
     
     def resizeEvent(self, event):
-        """窗口大小改变时更新覆盖层和VLC视频尺寸"""
+        """窗口大小改变时更新视频容器和VLC视频尺寸"""
         super().resizeEvent(event)
-        # 更新透明覆盖层尺寸
-        if hasattr(self, 'event_overlay'):
-            self.event_overlay.setGeometry(0, 0, self.width(), self.height())
+        # 更新视频容器尺寸
+        if hasattr(self, 'video_frame'):
+            self.video_frame.setGeometry(0, 0, self.width(), self.height())
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc:
             try:
@@ -482,7 +484,8 @@ class VideoWindow(QFrame):
             # VLC播放器 - 添加参数禁用overlay和启用拉伸
             self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
             self.vlc_player = self.vlc_instance.media_player_new()
-            self.vlc_player.set_hwnd(int(self.winId()))
+            # 渲染到video_frame控件上，而不是整个窗口
+            self.vlc_player.set_hwnd(int(self.video_frame.winId()))
             self.use_vlc = True
         else:
             # PyQt5播放器
