@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.20"
+APP_VERSION = "v2.21"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -414,6 +414,9 @@ class VideoWindow(QFrame):
     clicked = pyqtSignal(int)  # 点击信号，携带窗口编号
     window_closed = pyqtSignal(int)  # 窗口关闭信号，携带窗口编号
     
+    # 类变量：跟踪当前正在拖拽的窗口
+    _dragging_window = None
+    
     def __init__(self, window_id, parent=None):
         super().__init__(parent)
         self.window_id = window_id
@@ -448,6 +451,10 @@ class VideoWindow(QFrame):
             return
         
         try:
+            # 如果其他窗口正在拖拽，跳过
+            if VideoWindow._dragging_window is not None and VideoWindow._dragging_window != self:
+                return
+            
             # 获取鼠标左键状态
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000  # VK_LBUTTON
             
@@ -475,23 +482,31 @@ class VideoWindow(QFrame):
                     # 设置焦点，确保键盘事件能被接收
                     self.setFocus()
                     self.activateWindow()
+                    self.raise_()  # 提升到最上层
                     # 如果窗口未锁定，开始拖动
                     if not self.is_locked:
                         self.drag_position = global_pos - QPoint(win_x, win_y)
                         self.is_dragging = True
-                        self.raise_()
+                        VideoWindow._dragging_window = self  # 记录当前拖拽窗口
             elif not left_down and self.last_left_down:
                 # 鼠标释放
                 self.is_dragging = False
                 self.drag_position = None
+                if VideoWindow._dragging_window == self:
+                    VideoWindow._dragging_window = None  # 清除拖拽窗口
             elif left_down and self.is_dragging and not self.is_locked:
-                # 拖动中
+                # 拖动中 - 只有正在拖拽的窗口才移动
                 new_pos = global_pos - self.drag_position
                 self.move(new_pos)
             
             self.last_left_down = left_down
         except Exception as e:
-            pass
+            # 发生异常时重置状态
+            self.is_dragging = False
+            self.drag_position = None
+            self.last_left_down = False
+            if VideoWindow._dragging_window == self:
+                VideoWindow._dragging_window = None
         
     def init_ui(self):
         """初始化UI"""
@@ -753,6 +768,12 @@ class VideoWindow(QFrame):
     def closeEvent(self, event):
         """关闭事件"""
         self.stop()
+        # 停止拖拽定时器
+        if hasattr(self, 'drag_timer'):
+            self.drag_timer.stop()
+        # 清除拖拽状态
+        if VideoWindow._dragging_window == self:
+            VideoWindow._dragging_window = None
         # 发出窗口关闭信号
         self.window_closed.emit(self.window_id)
         event.accept()
