@@ -2,8 +2,14 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v2.17)'
+        required: true
+        default: 'v2.17'
 
 permissions:
   contents: write
@@ -39,10 +45,19 @@ jobs:
           --add-data "Kunzhancheng.ico;." `
           main.py
     
+    - name: Get version tag
+      id: get_version
+      run: |
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          echo "VERSION=${{ github.event.inputs.version }}" >> $env:GITHUB_OUTPUT
+        } else {
+          echo "VERSION=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+        }
+    
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v2.16
+        tag_name: ${{ steps.get_version.outputs.VERSION }}
         files: dist/media-player.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
