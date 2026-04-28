@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.11"
+APP_VERSION = "v2.12"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -435,35 +435,39 @@ class VideoWindow(QFrame):
             return
         
         try:
-            # 获取鼠标状态
+            # 获取鼠标左键状态
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000  # VK_LBUTTON
             
-            # 获取鼠标位置
-            cursor_pos = QPoint()
-            windll.user32.GetCursorPos(ctypes.byref(ctypes.c_long(cursor_pos.rx())))
-            # 简化：直接用QCursor
+            # 获取鼠标全局位置
             from PyQt5.QtGui import QCursor
             global_pos = QCursor.pos()
             
-            # 检查鼠标是否在窗口内
-            window_rect = self.geometry()
-            local_pos = self.mapFromGlobal(global_pos)
-            in_window = self.rect().contains(local_pos)
+            # 获取窗口在屏幕上的位置和大小
+            win_x = self.x()
+            win_y = self.y()
+            win_w = self.width()
+            win_h = self.height()
+            
+            # 检查鼠标是否在窗口矩形内
+            mouse_x = global_pos.x()
+            mouse_y = global_pos.y()
+            in_window = (win_x <= mouse_x < win_x + win_w and 
+                        win_y <= mouse_y < win_y + win_h)
             
             if left_down and not self.last_left_down:
                 # 鼠标按下
                 if in_window:
-                    self.drag_position = global_pos - window_rect.topLeft()
+                    # 记录拖动偏移
+                    self.drag_position = global_pos - QPoint(win_x, win_y)
                     self.is_dragging = True
-                    self.active_window = True
                     self.clicked.emit(self.window_id)
-                    self.raise_()  # 将窗口置顶
+                    self.raise_()
             elif not left_down and self.last_left_down:
                 # 鼠标释放
                 self.is_dragging = False
                 self.drag_position = None
             elif left_down and self.is_dragging:
-                # 鼠标移动（拖动中）
+                # 拖动中
                 new_pos = global_pos - self.drag_position
                 self.move(new_pos)
             
