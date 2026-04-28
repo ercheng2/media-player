@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.15"
+APP_VERSION = "v2.16"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -223,6 +223,18 @@ class ConfigManager:
         if str(window_id) not in self.config["windows"]:
             self.config["windows"][str(window_id)] = {}
         self.config["windows"][str(window_id)]["auto_open"] = auto_open
+    
+    def get_window_is_open(self, window_id):
+        """获取窗口是否打开状态（记忆还原用）"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("is_open", False)
+    
+    def set_window_is_open(self, window_id, is_open):
+        """设置窗口是否打开状态"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["is_open"] = is_open
     
     def get_window_default_media(self, window_id):
         """获取窗口默认播放的媒体"""
@@ -400,6 +412,7 @@ class VideoWindow(QFrame):
     
     # 信号定义
     clicked = pyqtSignal(int)  # 点击信号，携带窗口编号
+    window_closed = pyqtSignal(int)  # 窗口关闭信号，携带窗口编号
     
     def __init__(self, window_id, parent=None):
         super().__init__(parent)
@@ -718,6 +731,8 @@ class VideoWindow(QFrame):
     def closeEvent(self, event):
         """关闭事件"""
         self.stop()
+        # 发出窗口关闭信号
+        self.window_closed.emit(self.window_id)
         event.accept()
     
     def get_position(self):
@@ -1911,6 +1926,7 @@ class MainWindow(QMainWindow):
             if self.current_window_id not in self.video_windows:
                 window = VideoWindow(self.current_window_id)
                 window.clicked.connect(self.on_video_window_clicked)
+                window.window_closed.connect(self.on_video_window_closed)
                 self.video_windows[self.current_window_id] = window
                 
                 # 从配置加载该窗口保存的媒体文件
@@ -1939,6 +1955,19 @@ class MainWindow(QMainWindow):
         btn = self.window_tabs.button(window_id)
         if btn:
             btn.setChecked(True)
+    
+    def on_video_window_closed(self, window_id):
+        """视频窗口被关闭"""
+        if window_id in self.video_windows:
+            del self.video_windows[window_id]
+            self.log(f"窗口{window_id}已关闭")
+            # 如果关闭的是当前选中的窗口，切换到其他窗口
+            if self.current_window_id == window_id:
+                if self.video_windows:
+                    self.select_window(list(self.video_windows.keys())[0])
+                else:
+                    self.current_window_id = 1
+                    self.update_media_list_display()
     
     def add_media_file(self):
         """添加媒体文件"""
@@ -2366,13 +2395,19 @@ class MainWindow(QMainWindow):
             geometry.x(), geometry.y(), geometry.width(), geometry.height()
         )
         
-        # 保存各窗口的媒体列表和位置
+        # 先清除所有窗口的打开状态
+        for window_id in range(1, 5):
+            self.config_manager.set_window_is_open(window_id, False)
+        
+        # 保存各窗口的媒体列表、位置和打开状态
         for window_id, window in self.video_windows.items():
             self.config_manager.set_window_media_files(window_id, window.media_files)
             # 保存窗口位置
             pos = window.pos()
             size = window.size()
             self.config_manager.set_window_position(window_id, pos.x(), pos.y(), size.width(), size.height())
+            # 标记窗口为打开状态
+            self.config_manager.set_window_is_open(window_id, True)
         
         # 保存音量
         self.config_manager.set_global_volume(self.volume_slider.value())
@@ -2403,9 +2438,10 @@ class MainWindow(QMainWindow):
         print("配置已应用")
     
     def _auto_open_windows(self):
-        """自动打开配置为自动打开的窗口"""
+        """自动恢复上次打开的窗口（记忆还原）"""
         for window_id in range(1, 5):
-            if self.config_manager.get_window_auto_open(window_id):
+            # 使用is_open判断是否需要恢复窗口
+            if self.config_manager.get_window_is_open(window_id):
                 # 获取窗口位置
                 pos = self.config_manager.get_window_position(window_id)
                 # 获取媒体列表
@@ -2417,6 +2453,7 @@ class MainWindow(QMainWindow):
                     # 创建窗口
                     window = VideoWindow(window_id)
                     window.clicked.connect(self.on_video_window_clicked)
+                    window.window_closed.connect(self.on_video_window_closed)
                     window.set_media_files(media_files)
                     window.set_volume(self.volume_slider.value())
                     window.set_position(pos.get("x", 100), pos.get("y", 100), 
@@ -2431,7 +2468,7 @@ class MainWindow(QMainWindow):
                     elif media_files:
                         window.play(media_files[0])
                     
-                    self.log(f"窗口{window_id}已自动打开")
+                    self.log(f"窗口{window_id}已自动恢复")
 
 
 # ============== 程序入口 ==============
