@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.16"
+APP_VERSION = "v2.17"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -472,6 +472,9 @@ class VideoWindow(QFrame):
                 if in_window:
                     # 先触发clicked信号，更新current_window_id
                     self.clicked.emit(self.window_id)
+                    # 设置焦点，确保键盘事件能被接收
+                    self.setFocus()
+                    self.activateWindow()
                     # 如果窗口未锁定，开始拖动
                     if not self.is_locked:
                         self.drag_position = global_pos - QPoint(win_x, win_y)
@@ -1477,10 +1480,18 @@ class MainWindow(QMainWindow):
         
         media_layout.addLayout(setting_row)
         
-        # 打开窗口按钮
+        # 打开/删除窗口按钮
+        window_btn_layout = QHBoxLayout()
         self.open_window_btn = QPushButton("打开窗口1")
         self.open_window_btn.clicked.connect(self.open_current_window)
-        media_layout.addWidget(self.open_window_btn)
+        window_btn_layout.addWidget(self.open_window_btn)
+        
+        self.delete_window_btn = QPushButton("删除窗口1")
+        self.delete_window_btn.clicked.connect(self.delete_current_window)
+        self.delete_window_btn.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; }")
+        window_btn_layout.addWidget(self.delete_window_btn)
+        
+        media_layout.addLayout(window_btn_layout)
         
         media_group.setLayout(media_layout)
         layout.addWidget(media_group)
@@ -1851,6 +1862,7 @@ class MainWindow(QMainWindow):
         """选择窗口"""
         self.current_window_id = window_id
         self.open_window_btn.setText(f"打开窗口{window_id}")
+        self.delete_window_btn.setText(f"删除窗口{window_id}")
         
         # 更新位置显示
         if window_id in self.video_windows:
@@ -1968,6 +1980,31 @@ class MainWindow(QMainWindow):
                 else:
                     self.current_window_id = 1
                     self.update_media_list_display()
+    
+    def delete_current_window(self):
+        """删除当前窗口"""
+        window_id = self.current_window_id
+        
+        if window_id in self.video_windows:
+            # 关闭并删除窗口
+            window = self.video_windows[window_id]
+            window.stop()
+            window.close()
+            del self.video_windows[window_id]
+            
+            # 清除该窗口的媒体配置
+            self.config_manager.set_window_media_files(window_id, [])
+            
+            self.log(f"窗口{window_id}已删除")
+            
+            # 切换到其他窗口
+            if self.video_windows:
+                self.select_window(list(self.video_windows.keys())[0])
+            else:
+                self.current_window_id = 1
+                self.update_media_list_display()
+        else:
+            self.log(f"窗口{window_id}未打开，无需删除")
     
     def add_media_file(self):
         """添加媒体文件"""
