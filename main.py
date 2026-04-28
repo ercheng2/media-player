@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.19"
+APP_VERSION = "v2.20"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -546,9 +546,9 @@ class VideoWindow(QFrame):
         if hasattr(self, 'video_frame'):
             self.video_frame.setGeometry(0, 0, self.width(), self.height())
         # 更新VLC视频拉伸
-        if hasattr(self, 'vlc_player') and self.use_vlc:
+        if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
-                self._set_vlc_stretch()
+                self._safe_set_vlc_stretch()
             except:
                 pass
         
@@ -601,15 +601,24 @@ class VideoWindow(QFrame):
         
         try:
             if self.use_vlc:
+                # 先停止当前播放
+                try:
+                    self.vlc_player.stop()
+                except:
+                    pass
+                
                 media = self.vlc_instance.media_new(file_path)
                 # 添加选项让视频拉伸填充窗口
                 media.add_option(':no-keep-aspect-ratio')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
-                # 延迟设置拉伸和音量，确保播放器已启动
-                QTimer.singleShot(200, self._set_vlc_stretch)
-                QTimer.singleShot(300, self._apply_volume)
+                
+                # 立即设置音量（VLC需要播放后才能设置音量）
                 self.is_playing = True
+                
+                # 使用lambda确保回调时检查窗口是否仍然有效
+                QTimer.singleShot(200, lambda: self._safe_set_vlc_stretch())
+                QTimer.singleShot(300, lambda: self._safe_apply_volume())
             else:
                 self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(file_path)))
                 self.media_player.play()
@@ -619,22 +628,23 @@ class VideoWindow(QFrame):
             print(f"播放失败: {e}")
             return False
     
-    def _apply_volume(self):
-        """应用音量设置"""
+    def _safe_apply_volume(self):
+        """安全地应用音量设置"""
         try:
-            if self.use_vlc and not self.is_muted:
+            if hasattr(self, 'vlc_player') and self.use_vlc and not self.is_muted and self.is_playing:
                 self.vlc_player.audio_set_volume(self.volume)
         except:
             pass
     
-    def _set_vlc_stretch(self):
-        """设置VLC视频拉伸"""
+    def _safe_set_vlc_stretch(self):
+        """安全地设置VLC视频拉伸"""
         try:
-            # 设置视频拉伸填充窗口
-            self.vlc_player.video_set_scale(0)
-            # 获取窗口尺寸并设置宽高比
-            w, h = self.width(), self.height()
-            self.vlc_player.video_set_aspect_ratio(f"{w}:{h}")
+            if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
+                # 设置视频拉伸填充窗口
+                self.vlc_player.video_set_scale(0)
+                # 获取窗口尺寸并设置宽高比
+                w, h = self.width(), self.height()
+                self.vlc_player.video_set_aspect_ratio(f"{w}:{h}")
         except:
             pass
     
