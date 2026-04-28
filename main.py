@@ -76,7 +76,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.6"
+APP_VERSION = "v2.7"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -452,6 +452,10 @@ class VideoWindow(QFrame):
         # 设置初始大小和位置
         self.resize(800, 600)
         
+        # 启用鼠标追踪，确保能接收鼠标事件
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        
     def init_player(self):
         """初始化播放器"""
         if VLC_AVAILABLE:
@@ -501,10 +505,10 @@ class VideoWindow(QFrame):
         try:
             if self.use_vlc:
                 media = self.vlc_instance.media_new(file_path)
-                # 添加选项让视频拉伸填充窗口（忽略原始比例）
-                media.add_option(':no-keep-aspect-ratio')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
+                # 延迟设置拉伸，确保播放器已启动
+                QTimer.singleShot(100, lambda: self.vlc_player.video_set_scale(0))
                 self.is_playing = True
             else:
                 self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(file_path)))
@@ -621,6 +625,17 @@ class VideoWindow(QFrame):
         """鼠标释放"""
         self.is_dragging = False
         self.drag_position = None
+    
+    def resizeEvent(self, event):
+        """窗口大小改变时更新VLC视频尺寸"""
+        super().resizeEvent(event)
+        if self.use_vlc and hasattr(self, 'vlc_player'):
+            try:
+                # 重新设置窗口句柄和拉伸
+                self.vlc_player.set_hwnd(int(self.winId()))
+                self.vlc_player.video_set_scale(0)
+            except:
+                pass
     
     def keyPressEvent(self, event):
         """按键事件"""
