@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.17"
+APP_VERSION = "v2.18"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -1988,6 +1988,13 @@ class MainWindow(QMainWindow):
         if window_id in self.video_windows:
             # 关闭并删除窗口
             window = self.video_windows[window_id]
+            
+            # 先断开信号连接，避免close()触发on_video_window_closed导致重复处理
+            try:
+                window.window_closed.disconnect(self.on_video_window_closed)
+            except:
+                pass
+            
             window.stop()
             window.close()
             del self.video_windows[window_id]
