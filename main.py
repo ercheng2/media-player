@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.18"
+APP_VERSION = "v2.19"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -606,8 +606,9 @@ class VideoWindow(QFrame):
                 media.add_option(':no-keep-aspect-ratio')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
-                # 延迟设置拉伸，确保播放器已启动
+                # 延迟设置拉伸和音量，确保播放器已启动
                 QTimer.singleShot(200, self._set_vlc_stretch)
+                QTimer.singleShot(300, self._apply_volume)
                 self.is_playing = True
             else:
                 self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(file_path)))
@@ -617,6 +618,14 @@ class VideoWindow(QFrame):
         except Exception as e:
             print(f"播放失败: {e}")
             return False
+    
+    def _apply_volume(self):
+        """应用音量设置"""
+        try:
+            if self.use_vlc and not self.is_muted:
+                self.vlc_player.audio_set_volume(self.volume)
+        except:
+            pass
     
     def _set_vlc_stretch(self):
         """设置VLC视频拉伸"""
@@ -1486,7 +1495,7 @@ class MainWindow(QMainWindow):
         self.open_window_btn.clicked.connect(self.open_current_window)
         window_btn_layout.addWidget(self.open_window_btn)
         
-        self.delete_window_btn = QPushButton("删除窗口1")
+        self.delete_window_btn = QPushButton("关闭窗口1")
         self.delete_window_btn.clicked.connect(self.delete_current_window)
         self.delete_window_btn.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; }")
         window_btn_layout.addWidget(self.delete_window_btn)
@@ -1862,7 +1871,7 @@ class MainWindow(QMainWindow):
         """选择窗口"""
         self.current_window_id = window_id
         self.open_window_btn.setText(f"打开窗口{window_id}")
-        self.delete_window_btn.setText(f"删除窗口{window_id}")
+        self.delete_window_btn.setText(f"关闭窗口{window_id}")
         
         # 更新位置显示
         if window_id in self.video_windows:
@@ -1982,11 +1991,11 @@ class MainWindow(QMainWindow):
                     self.update_media_list_display()
     
     def delete_current_window(self):
-        """删除当前窗口"""
+        """删除当前窗口（只关闭窗口，保留媒体内容）"""
         window_id = self.current_window_id
         
         if window_id in self.video_windows:
-            # 关闭并删除窗口
+            # 关闭窗口
             window = self.video_windows[window_id]
             
             # 先断开信号连接，避免close()触发on_video_window_closed导致重复处理
@@ -1999,10 +2008,9 @@ class MainWindow(QMainWindow):
             window.close()
             del self.video_windows[window_id]
             
-            # 清除该窗口的媒体配置
-            self.config_manager.set_window_media_files(window_id, [])
+            # 注意：不清除媒体配置，下次打开窗口时媒体内容还在
             
-            self.log(f"窗口{window_id}已删除")
+            self.log(f"窗口{window_id}已关闭（媒体内容已保留）")
             
             # 切换到其他窗口
             if self.video_windows:
@@ -2011,7 +2019,7 @@ class MainWindow(QMainWindow):
                 self.current_window_id = 1
                 self.update_media_list_display()
         else:
-            self.log(f"窗口{window_id}未打开，无需删除")
+            self.log(f"窗口{window_id}未打开，无需关闭")
     
     def add_media_file(self):
         """添加媒体文件"""
