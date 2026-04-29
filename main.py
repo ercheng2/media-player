@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.25"
+APP_VERSION = "v2.26"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -472,12 +472,11 @@ class VideoWindow(QFrame):
         super().mouseReleaseEvent(event)
     
     def eventFilter(self, obj, event):
-        """事件过滤器，将video_frame的鼠标事件转发给父窗口"""
+        """事件过滤器：处理overlay上的鼠标事件，实现拖拽"""
         from PyQt5.QtCore import QEvent
-        if obj == self.video_frame:
+        if obj == self.overlay:
             et = event.type()
             if et == QEvent.MouseButtonPress:
-                # 手动调用处理函数
                 if event.button() == Qt.LeftButton:
                     self.clicked.emit(self.window_id)
                     self.setFocus()
@@ -522,11 +521,20 @@ class VideoWindow(QFrame):
         self.video_frame = QWidget(self)
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
-        # 启用鼠标追踪，确保能收到鼠标移动事件
-        self.video_frame.setMouseTracking(True)
-        # 安装事件过滤器，将鼠标事件转发给父窗口
-        self.video_frame.installEventFilter(self)
         self.video_frame.show()
+        
+        # 透明遮罩层：盖在video_frame上方，拦截鼠标事件
+        # VLC渲染到video_frame后会吞掉鼠标事件，eventFilter根本收不到
+        # 用透明遮罩层可以先把鼠标事件截住，再转发给VideoWindow处理拖拽
+        self.overlay = QWidget(self)
+        self.overlay.setStyleSheet("background-color: transparent;")
+        self.overlay.setGeometry(0, 0, 800, 600)
+        self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.overlay.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.overlay.setMouseTracking(True)
+        self.overlay.installEventFilter(self)
+        self.overlay.raise_()
+        self.overlay.show()
         
         # 窗口编号标签（在视频上方）
         self.label_id = QLabel(f"窗口{self.window_id}", self)
@@ -540,7 +548,7 @@ class VideoWindow(QFrame):
             }
         """)
         self.label_id.move(10, 10)
-        self.label_id.raise_()  # 确保在视频上方
+        self.label_id.raise_()  # 确保在遮罩层上方
         self.label_id.show()
         
         # 设置初始大小和位置
@@ -556,6 +564,10 @@ class VideoWindow(QFrame):
         # 更新视频容器尺寸
         if hasattr(self, 'video_frame'):
             self.video_frame.setGeometry(0, 0, self.width(), self.height())
+        # 更新遮罩层尺寸（和视频容器同步）
+        if hasattr(self, 'overlay'):
+            self.overlay.setGeometry(0, 0, self.width(), self.height())
+            self.overlay.raise_()
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
