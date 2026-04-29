@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.24"
+APP_VERSION = "v2.25"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -475,14 +475,30 @@ class VideoWindow(QFrame):
         """事件过滤器，将video_frame的鼠标事件转发给父窗口"""
         from PyQt5.QtCore import QEvent
         if obj == self.video_frame:
-            if event.type() == QEvent.MouseButtonPress:
-                self.mousePressEvent(event)
+            et = event.type()
+            if et == QEvent.MouseButtonPress:
+                # 手动调用处理函数
+                if event.button() == Qt.LeftButton:
+                    self.clicked.emit(self.window_id)
+                    self.setFocus()
+                    self.activateWindow()
+                    self.raise_()
+                    if not self.is_locked:
+                        self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+                        self.is_dragging = True
+                        VideoWindow._dragging_window = self
                 return True
-            elif event.type() == QEvent.MouseButtonRelease:
-                self.mouseReleaseEvent(event)
+            elif et == QEvent.MouseButtonRelease:
+                if event.button() == Qt.LeftButton:
+                    self.is_dragging = False
+                    self.drag_position = None
+                    if VideoWindow._dragging_window == self:
+                        VideoWindow._dragging_window = None
                 return True
-            elif event.type() == QEvent.MouseMove:
-                self.mouseMoveEvent(event)
+            elif et == QEvent.MouseMove:
+                if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
+                    if self.drag_position:
+                        self.move(event.globalPos() - self.drag_position)
                 return True
         return super().eventFilter(obj, event)
         
@@ -506,6 +522,8 @@ class VideoWindow(QFrame):
         self.video_frame = QWidget(self)
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
+        # 启用鼠标追踪，确保能收到鼠标移动事件
+        self.video_frame.setMouseTracking(True)
         # 安装事件过滤器，将鼠标事件转发给父窗口
         self.video_frame.installEventFilter(self)
         self.video_frame.show()
