@@ -1813,7 +1813,8 @@ class MainWindow(QMainWindow):
         
         # 按钮行：添加视频 | 移除选中 | 自动打开
         btn_row = QHBoxLayout()
-        add_btn = QPushButton("添加视频")
+        add_btn = QPushButton(" 添加视频")
+        add_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
         add_btn.clicked.connect(self.add_media_file)
         btn_row.addWidget(add_btn)
         
@@ -2237,7 +2238,11 @@ class MainWindow(QMainWindow):
         
         # 设置图标
         try:
-            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+            icon_path = get_resource_path("Kunzhancheng.ico")
+            if os.path.exists(icon_path):
+                self.tray_icon.setIcon(QIcon(icon_path))
+            else:
+                self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
         except:
             pass
         
