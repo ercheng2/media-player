@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.29"
+APP_VERSION = "v2.30"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -407,23 +407,6 @@ class LicenseManager:
 
 # ============== 视频播放器窗口 ==============
 
-class TransparentOverlay(QWidget):
-    """透明遮罩层：拦截鼠标事件实现拖拽，视觉上完全透明
-    
-    关键：必须用WA_TranslucentBackground让Windows正确合成透明窗口。
-    同时VLC需要用DirectDraw渲染（--vout directdraw），因为Direct3D
-    与分层窗口不兼容，会挡住视频输出。DirectDraw兼容分层窗口。
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAutoFillBackground(False)
-        self.setMouseTracking(True)
-    
-    def paintEvent(self, event):
-        pass
-
-
 class VideoWindow(QFrame):
     """无边框视频播放窗口"""
     
@@ -452,71 +435,71 @@ class VideoWindow(QFrame):
         # 初始化播放器
         self.init_player()
         
-        # 拖拽相关
+        # 拖拽相关 - 使用定时器轮询鼠标状态
+        # VLC渲染会吞掉Qt鼠标事件，overlay方案会挡视频，钩子方案会闪退
+        # 定时器+Windows API是最稳定的方案，完全不依赖Qt事件系统
         self.drag_position = None
         self.is_dragging = False
+        self.last_left_down = False
+        self.drag_timer = QTimer(self)
+        self.drag_timer.timeout.connect(self.check_drag)
+        self.drag_timer.start(16)  # ~60fps
         
-    def mousePressEvent(self, event):
-        """鼠标按下事件"""
-        if event.button() == Qt.LeftButton:
-            # 触发clicked信号
-            self.clicked.emit(self.window_id)
-            # 设置焦点
-            self.setFocus()
-            self.activateWindow()
-            self.raise_()
-            # 开始拖拽
-            if not self.is_locked:
-                self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-                self.is_dragging = True
-                VideoWindow._dragging_window = self
-        super().mousePressEvent(event)
-    
-    def mouseMoveEvent(self, event):
-        """鼠标移动事件"""
-        if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
-            if self.drag_position:
-                self.move(event.globalPos() - self.drag_position)
-        super().mouseMoveEvent(event)
-    
-    def mouseReleaseEvent(self, event):
-        """鼠标释放事件"""
-        if event.button() == Qt.LeftButton:
-            self.is_dragging = False
-            self.drag_position = None
-            if VideoWindow._dragging_window == self:
-                VideoWindow._dragging_window = None
-        super().mouseReleaseEvent(event)
-    
-    def eventFilter(self, obj, event):
-        """事件过滤器：拦截overlay上的鼠标事件，实现窗口拖拽"""
-        from PyQt5.QtCore import QEvent
-        if obj == self.overlay:
-            et = event.type()
-            if et == QEvent.MouseButtonPress:
-                if event.button() == Qt.LeftButton:
+    def check_drag(self):
+        """定时器检查鼠标状态，实现窗口拖拽
+        
+        不依赖Qt事件系统，直接用Windows API检测鼠标按键和位置。
+        这样VLC无论用什么渲染方式都不影响拖拽。
+        """
+        if platform.system() != 'Windows' or not self.isVisible() or windll is None:
+            return
+        
+        try:
+            # 如果其他窗口正在拖拽，跳过
+            if VideoWindow._dragging_window is not None and VideoWindow._dragging_window != self:
+                return
+            
+            # 获取鼠标左键状态
+            left_down = windll.user32.GetAsyncKeyState(1) & 0x8000
+            
+            # 获取鼠标全局位置
+            from PyQt5.QtGui import QCursor
+            from PyQt5.QtCore import QPoint
+            global_pos = QCursor.pos()
+            
+            # 检查鼠标是否在窗口矩形内
+            win_rect = self.frameGeometry()
+            in_window = win_rect.contains(global_pos)
+            
+            if left_down and not self.last_left_down:
+                # 鼠标按下
+                if in_window:
                     self.clicked.emit(self.window_id)
                     self.setFocus()
                     self.activateWindow()
                     self.raise_()
                     if not self.is_locked:
-                        self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+                        self.drag_position = global_pos - QPoint(win_rect.x(), win_rect.y())
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
-                return True
-            elif et == QEvent.MouseButtonRelease:
-                if event.button() == Qt.LeftButton:
-                    self.is_dragging = False
-                    self.drag_position = None
-                    if VideoWindow._dragging_window == self:
-                        VideoWindow._dragging_window = None
-                return True
-            elif et == QEvent.MouseMove:
-                if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
-                    if self.drag_position:
-                        self.move(event.globalPos() - self.drag_position)
-                return True
-        return super().eventFilter(obj, event)
+            elif not left_down and self.last_left_down:
+                # 鼠标释放
+                self.is_dragging = False
+                self.drag_position = None
+                if VideoWindow._dragging_window == self:
+                    VideoWindow._dragging_window = None
+            elif left_down and self.is_dragging and not self.is_locked:
+                # 拖动中
+                if self.drag_position:
+                    self.move(global_pos - self.drag_position)
+            
+            self.last_left_down = left_down
+        except:
+            self.is_dragging = False
+            self.drag_position = None
+            self.last_left_down = False
+            if VideoWindow._dragging_window == self:
+                VideoWindow._dragging_window = None
         
     def init_ui(self):
         """初始化UI"""
@@ -539,14 +522,6 @@ class VideoWindow(QFrame):
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
         self.video_frame.show()
-        
-        # 透明遮罩层：盖在video_frame上方，拦截鼠标事件实现拖拽
-        # 配合VLC使用DirectDraw渲染（--vout directdraw），Direct3D与分层窗口不兼容
-        self.overlay = TransparentOverlay(self)
-        self.overlay.setGeometry(0, 0, 800, 600)
-        self.overlay.installEventFilter(self)
-        self.overlay.raise_()
-        self.overlay.show()
         
         # 窗口编号标签（在视频上方）
         self.label_id = QLabel(f"窗口{self.window_id}", self)
@@ -575,10 +550,6 @@ class VideoWindow(QFrame):
         super().resizeEvent(event)
         if hasattr(self, 'video_frame'):
             self.video_frame.setGeometry(0, 0, self.width(), self.height())
-        # 更新遮罩层尺寸，保持在最上层
-        if hasattr(self, 'overlay'):
-            self.overlay.setGeometry(0, 0, self.width(), self.height())
-            self.overlay.raise_()
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
@@ -589,10 +560,8 @@ class VideoWindow(QFrame):
     def init_player(self):
         """初始化播放器"""
         if VLC_AVAILABLE:
-            # VLC播放器：使用DirectDraw渲染（兼容分层窗口/overlay）
-            # 默认Direct3D与WA_TranslucentBackground分层窗口不兼容，会挡住视频输出
-            # DirectDraw通过GDI合成，与分层窗口兼容
-            self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay --vout directdraw')
+            # VLC播放器
+            self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
             self.vlc_player = self.vlc_instance.media_player_new()
             # 渲染到video_frame控件上，而不是整个窗口
             self.vlc_player.set_hwnd(int(self.video_frame.winId()))
