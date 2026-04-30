@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -40,9 +43,12 @@ jobs:
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports main.py
     
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
       with:
-        name: media-player-windows
-        path: dist/*.exe
-        retention-days: 30
+        tag_name: v2.38
+        name: "坤展成-中控多窗口播放器 v2.38"
+        body: "Windows版本 - VLC播放器 + 视频铺满修复"
+        files: dist/*.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
