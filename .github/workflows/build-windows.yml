@@ -1,0 +1,39 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install pyinstaller python-vlc PyQt5 pyserial
+    
+    - name: Download VLC
+      run: |
+        Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.zip" -OutFile "vlc.zip"
+        Expand-Archive -Path "vlc.zip" -DestinationPath "vlc_temp"
+        Move-Item -Path "vlc_temp/vlc-3.0.21-win64" -Destination "vlc"
+    
+    - name: Build EXE
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "坤展成-中控多窗口播放器" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports main.py
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: media-player-windows
+        path: dist/*.exe
+        retention-days: 30
