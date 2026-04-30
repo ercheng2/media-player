@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.27"
+APP_VERSION = "v2.28"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -472,7 +472,7 @@ class VideoWindow(QFrame):
         super().mouseReleaseEvent(event)
     
     def eventFilter(self, obj, event):
-        """事件过滤器（备用）"""
+        """事件过滤器"""
         return super().eventFilter(obj, event)
         
     def init_ui(self):
@@ -495,6 +495,13 @@ class VideoWindow(QFrame):
         self.video_frame = QWidget(self)
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
+        # 关键：让鼠标事件穿透video_frame到达父窗口VideoWindow
+        # VLC渲染到video_frame后会在Windows消息层面吞掉鼠标事件
+        # 设置WA_TransparentForMouseEvents后，鼠标事件直接穿透到VideoWindow
+        # 由VideoWindow的mousePressEvent/mouseMoveEvent/mouseReleaseEvent处理拖拽
+        # 不影响VLC视频渲染（渲染和鼠标是两个独立的消息通道）
+        self.video_frame.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.video_frame.setMouseTracking(True)
         self.video_frame.show()
         
         # 窗口编号标签（在视频上方）
@@ -545,11 +552,6 @@ class VideoWindow(QFrame):
             # 设置VLC事件管理器，监听播放结束事件
             self.vlc_events = self.vlc_player.event_manager()
             self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
-            
-            # Windows上：子类化video_frame的WndProc来拦截鼠标事件
-            # VLC渲染到video_frame后会吞掉鼠标事件，Qt的eventFilter收不到
-            # 用Win32子类化可以在Windows消息层面拦截，不影响VLC渲染
-            self._install_win32_mouse_hook()
         else:
             # PyQt5播放器
             self.media_player = QMediaPlayer()
@@ -560,97 +562,6 @@ class VideoWindow(QFrame):
         """设置窗口位置和大小"""
         self.move(int(x), int(y))
         self.resize(int(width), int(height))
-    
-    def _install_win32_mouse_hook(self):
-        """Windows上子类化video_frame的WndProc来拦截鼠标事件
-        
-        VLC渲染到video_frame后会吞掉鼠标事件，Qt的eventFilter根本收不到。
-        用Win32 SetWindowLongPtr子类化WndProc，在Windows消息层面拦截鼠标消息，
-        然后通过QTimer转发到Qt主线程处理拖拽逻辑。
-        这样既不影响VLC视频渲染，又能正常拖动窗口。
-        """
-        import platform
-        if platform.system() != 'Windows':
-            return
-        
-        try:
-            import ctypes
-            from ctypes import WINFUNCTYPE, c_long, c_void_p, c_uint
-            
-            user32 = ctypes.windll.user32
-            hwnd = int(self.video_frame.winId())
-            
-            if not hasattr(VideoWindow, '_win32_hooks'):
-                VideoWindow._win32_hooks = {}
-            
-            if hwnd in VideoWindow._win32_hooks:
-                return
-            
-            GWLP_WNDPROC = -4
-            WM_LBUTTONDOWN = 0x0201
-            WM_LBUTTONUP = 0x0202
-            WM_MOUSEMOVE = 0x0200
-            MK_LBUTTON = 0x0001
-            
-            WNDPROC = WINFUNCTYPE(c_long, c_void_p, c_uint, c_void_p, c_void_p)
-            
-            video_window = self
-            
-            def new_wndproc(hwnd_val, msg, wparam, lparam):
-                if msg == WM_LBUTTONDOWN:
-                    from PyQt5.QtCore import QPoint
-                    x = ctypes.c_short(lparam & 0xFFFF).value
-                    y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
-                    global_pos = video_window.video_frame.mapToGlobal(QPoint(x, y))
-                    QTimer.singleShot(0, lambda gp=global_pos: video_window._handle_frame_mouse_press(gp))
-                    return 0
-                
-                elif msg == WM_LBUTTONUP:
-                    QTimer.singleShot(0, lambda: video_window._handle_frame_mouse_release())
-                    return 0
-                
-                elif msg == WM_MOUSEMOVE and (wparam & MK_LBUTTON):
-                    from PyQt5.QtCore import QPoint
-                    x = ctypes.c_short(lparam & 0xFFFF).value
-                    y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
-                    global_pos = video_window.video_frame.mapToGlobal(QPoint(x, y))
-                    QTimer.singleShot(0, lambda gp=global_pos: video_window._handle_frame_mouse_move(gp))
-                    return 0
-                
-                # 其他消息传给原始WndProc
-                original = VideoWindow._win32_hooks[int(hwnd_val)][0]
-                return user32.CallWindowProcW(original, hwnd_val, msg, wparam, lparam)
-            
-            callback = WNDPROC(new_wndproc)
-            original = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, callback)
-            VideoWindow._win32_hooks[hwnd] = (original, callback)
-            
-        except Exception as e:
-            print(f"Win32鼠标钩子安装失败: {e}")
-    
-    def _handle_frame_mouse_press(self, global_pos):
-        """处理video_frame上的鼠标按下（由Win32子类化回调）"""
-        self.clicked.emit(self.window_id)
-        self.setFocus()
-        self.activateWindow()
-        self.raise_()
-        if not self.is_locked:
-            self.drag_position = global_pos - self.frameGeometry().topLeft()
-            self.is_dragging = True
-            VideoWindow._dragging_window = self
-    
-    def _handle_frame_mouse_move(self, global_pos):
-        """处理video_frame上的鼠标移动（由Win32子类化回调）"""
-        if self.is_dragging and not self.is_locked:
-            if self.drag_position:
-                self.move(global_pos - self.drag_position)
-    
-    def _handle_frame_mouse_release(self):
-        """处理video_frame上的鼠标释放（由Win32子类化回调）"""
-        self.is_dragging = False
-        self.drag_position = None
-        if VideoWindow._dragging_window == self:
-            VideoWindow._dragging_window = None
     
     def _on_vlc_end_reached(self, event):
         """VLC播放结束回调"""
