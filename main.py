@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.30"
+APP_VERSION = "v2.31"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -441,15 +441,18 @@ class VideoWindow(QFrame):
         self.drag_position = None
         self.is_dragging = False
         self.last_left_down = False
+        self.click_pending = False  # 标记是否需要触发clicked信号
         self.drag_timer = QTimer(self)
         self.drag_timer.timeout.connect(self.check_drag)
-        self.drag_timer.start(16)  # ~60fps
+        self.drag_timer.start(50)  # 20fps，够用且不堵主线程
         
     def check_drag(self):
         """定时器检查鼠标状态，实现窗口拖拽
         
         不依赖Qt事件系统，直接用Windows API检测鼠标按键和位置。
-        这样VLC无论用什么渲染方式都不影响拖拽。
+        注意：不在定时器里调用setFocus/activateWindow/raise_，
+        这些会触发窗口管理器切换，和主界面交互可能死锁。
+        clicked信号用单次触发，避免重复emit。
         """
         if platform.system() != 'Windows' or not self.isVisible() or windll is None:
             return
@@ -463,8 +466,6 @@ class VideoWindow(QFrame):
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000
             
             # 获取鼠标全局位置
-            from PyQt5.QtGui import QCursor
-            from PyQt5.QtCore import QPoint
             global_pos = QCursor.pos()
             
             # 检查鼠标是否在窗口矩形内
@@ -474,11 +475,12 @@ class VideoWindow(QFrame):
             if left_down and not self.last_left_down:
                 # 鼠标按下
                 if in_window:
-                    self.clicked.emit(self.window_id)
-                    self.setFocus()
-                    self.activateWindow()
-                    self.raise_()
+                    # 只emit一次clicked信号，不做UI焦点操作
+                    if not self.click_pending:
+                        self.click_pending = True
+                        self.clicked.emit(self.window_id)
                     if not self.is_locked:
+                        from PyQt5.QtCore import QPoint
                         self.drag_position = global_pos - QPoint(win_rect.x(), win_rect.y())
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
@@ -486,11 +488,13 @@ class VideoWindow(QFrame):
                 # 鼠标释放
                 self.is_dragging = False
                 self.drag_position = None
+                self.click_pending = False
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
             elif left_down and self.is_dragging and not self.is_locked:
                 # 拖动中
                 if self.drag_position:
+                    from PyQt5.QtCore import QPoint
                     self.move(global_pos - self.drag_position)
             
             self.last_left_down = left_down
@@ -498,6 +502,7 @@ class VideoWindow(QFrame):
             self.is_dragging = False
             self.drag_position = None
             self.last_left_down = False
+            self.click_pending = False
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
         
@@ -584,8 +589,9 @@ class VideoWindow(QFrame):
     def _on_vlc_end_reached(self, event):
         """VLC播放结束回调"""
         if self.loop_play and self.is_playing:
-            # 使用QTimer在主线程中重新播放
-            QTimer.singleShot(100, self.replay)
+            self.is_playing = False  # 先标记为未播放
+            # 使用QTimer在主线程中重新播放，延迟200ms避免VLC状态冲突
+            QTimer.singleShot(200, self.replay)
     
     def _on_qt_state_changed(self, state):
         """Qt播放器状态改变回调"""
@@ -779,6 +785,9 @@ class VideoWindow(QFrame):
     
     def closeEvent(self, event):
         """关闭事件"""
+        # 停止拖拽定时器
+        if hasattr(self, 'drag_timer'):
+            self.drag_timer.stop()
         self.stop()
         # 清除拖拽状态
         if VideoWindow._dragging_window == self:
