@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.28"
+APP_VERSION = "v2.29"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -407,6 +407,23 @@ class LicenseManager:
 
 # ============== 视频播放器窗口 ==============
 
+class TransparentOverlay(QWidget):
+    """透明遮罩层：拦截鼠标事件实现拖拽，视觉上完全透明
+    
+    关键：必须用WA_TranslucentBackground让Windows正确合成透明窗口。
+    同时VLC需要用DirectDraw渲染（--vout directdraw），因为Direct3D
+    与分层窗口不兼容，会挡住视频输出。DirectDraw兼容分层窗口。
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self.setMouseTracking(True)
+    
+    def paintEvent(self, event):
+        pass
+
+
 class VideoWindow(QFrame):
     """无边框视频播放窗口"""
     
@@ -472,7 +489,33 @@ class VideoWindow(QFrame):
         super().mouseReleaseEvent(event)
     
     def eventFilter(self, obj, event):
-        """事件过滤器"""
+        """事件过滤器：拦截overlay上的鼠标事件，实现窗口拖拽"""
+        from PyQt5.QtCore import QEvent
+        if obj == self.overlay:
+            et = event.type()
+            if et == QEvent.MouseButtonPress:
+                if event.button() == Qt.LeftButton:
+                    self.clicked.emit(self.window_id)
+                    self.setFocus()
+                    self.activateWindow()
+                    self.raise_()
+                    if not self.is_locked:
+                        self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+                        self.is_dragging = True
+                        VideoWindow._dragging_window = self
+                return True
+            elif et == QEvent.MouseButtonRelease:
+                if event.button() == Qt.LeftButton:
+                    self.is_dragging = False
+                    self.drag_position = None
+                    if VideoWindow._dragging_window == self:
+                        VideoWindow._dragging_window = None
+                return True
+            elif et == QEvent.MouseMove:
+                if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
+                    if self.drag_position:
+                        self.move(event.globalPos() - self.drag_position)
+                return True
         return super().eventFilter(obj, event)
         
     def init_ui(self):
@@ -495,14 +538,15 @@ class VideoWindow(QFrame):
         self.video_frame = QWidget(self)
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
-        # 关键：让鼠标事件穿透video_frame到达父窗口VideoWindow
-        # VLC渲染到video_frame后会在Windows消息层面吞掉鼠标事件
-        # 设置WA_TransparentForMouseEvents后，鼠标事件直接穿透到VideoWindow
-        # 由VideoWindow的mousePressEvent/mouseMoveEvent/mouseReleaseEvent处理拖拽
-        # 不影响VLC视频渲染（渲染和鼠标是两个独立的消息通道）
-        self.video_frame.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.video_frame.setMouseTracking(True)
         self.video_frame.show()
+        
+        # 透明遮罩层：盖在video_frame上方，拦截鼠标事件实现拖拽
+        # 配合VLC使用DirectDraw渲染（--vout directdraw），Direct3D与分层窗口不兼容
+        self.overlay = TransparentOverlay(self)
+        self.overlay.setGeometry(0, 0, 800, 600)
+        self.overlay.installEventFilter(self)
+        self.overlay.raise_()
+        self.overlay.show()
         
         # 窗口编号标签（在视频上方）
         self.label_id = QLabel(f"窗口{self.window_id}", self)
@@ -529,9 +573,12 @@ class VideoWindow(QFrame):
     def resizeEvent(self, event):
         """窗口大小改变时更新视频容器和VLC视频尺寸"""
         super().resizeEvent(event)
-        # 更新视频容器尺寸
         if hasattr(self, 'video_frame'):
             self.video_frame.setGeometry(0, 0, self.width(), self.height())
+        # 更新遮罩层尺寸，保持在最上层
+        if hasattr(self, 'overlay'):
+            self.overlay.setGeometry(0, 0, self.width(), self.height())
+            self.overlay.raise_()
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
@@ -542,8 +589,10 @@ class VideoWindow(QFrame):
     def init_player(self):
         """初始化播放器"""
         if VLC_AVAILABLE:
-            # VLC播放器 - 添加参数禁用overlay和启用拉伸
-            self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
+            # VLC播放器：使用DirectDraw渲染（兼容分层窗口/overlay）
+            # 默认Direct3D与WA_TranslucentBackground分层窗口不兼容，会挡住视频输出
+            # DirectDraw通过GDI合成，与分层窗口兼容
+            self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay --vout directdraw')
             self.vlc_player = self.vlc_instance.media_player_new()
             # 渲染到video_frame控件上，而不是整个窗口
             self.vlc_player.set_hwnd(int(self.video_frame.winId()))
