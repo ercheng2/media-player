@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.31"
+APP_VERSION = "v2.32"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -450,9 +450,8 @@ class VideoWindow(QFrame):
         """定时器检查鼠标状态，实现窗口拖拽
         
         不依赖Qt事件系统，直接用Windows API检测鼠标按键和位置。
-        注意：不在定时器里调用setFocus/activateWindow/raise_，
-        这些会触发窗口管理器切换，和主界面交互可能死锁。
-        clicked信号用单次触发，避免重复emit。
+        使用GetCursorPos替代QCursor.pos()，更稳定。
+        用geometry()替代frameGeometry()，无边框窗口更准确。
         """
         if platform.system() != 'Windows' or not self.isVisible() or windll is None:
             return
@@ -465,23 +464,27 @@ class VideoWindow(QFrame):
             # 获取鼠标左键状态
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000
             
-            # 获取鼠标全局位置
-            global_pos = QCursor.pos()
+            # 用Windows API获取鼠标位置，比QCursor更可靠
+            class POINT(Structure):
+                _fields_ = [("x", c_int), ("y", c_int)]
+            pt = POINT()
+            windll.user32.GetCursorPos(byref(pt))
+            mx, my = pt.x, pt.y
             
-            # 检查鼠标是否在窗口矩形内
-            win_rect = self.frameGeometry()
-            in_window = win_rect.contains(global_pos)
+            # 检查鼠标是否在窗口内（用geometry，无边框窗口更准确）
+            geo = self.geometry()
+            in_window = (geo.x() <= mx < geo.x() + geo.width() and 
+                        geo.y() <= my < geo.y() + geo.height())
             
             if left_down and not self.last_left_down:
                 # 鼠标按下
                 if in_window:
-                    # 只emit一次clicked信号，不做UI焦点操作
                     if not self.click_pending:
                         self.click_pending = True
                         self.clicked.emit(self.window_id)
                     if not self.is_locked:
                         from PyQt5.QtCore import QPoint
-                        self.drag_position = global_pos - QPoint(win_rect.x(), win_rect.y())
+                        self.drag_position = QPoint(mx - geo.x(), my - geo.y())
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
             elif not left_down and self.last_left_down:
@@ -495,7 +498,7 @@ class VideoWindow(QFrame):
                 # 拖动中
                 if self.drag_position:
                     from PyQt5.QtCore import QPoint
-                    self.move(global_pos - self.drag_position)
+                    self.move(QPoint(mx - self.drag_position.x(), my - self.drag_position.y()))
             
             self.last_left_down = left_down
         except:
@@ -1558,32 +1561,75 @@ class MainWindow(QMainWindow):
         control_group = QGroupBox("播放控制 → 窗口1")
         control_group.setObjectName("control_group")
         self.control_group = control_group
-        control_layout = QHBoxLayout()
+        control_layout = QVBoxLayout()
         
+        # 第一行按钮
+        btn_row1 = QHBoxLayout()
         self.play_btn = QPushButton("▶ 播放")
+        self.play_btn.setToolTip("UDP指令: play")
         self.play_btn.clicked.connect(self.play_current)
-        control_layout.addWidget(self.play_btn)
+        btn_row1.addWidget(self.play_btn)
+        play_cmd_label = QLabel("play")
+        play_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row1.addWidget(play_cmd_label)
         
         self.pause_btn = QPushButton("⏸ 暂停")
+        self.pause_btn.setToolTip("UDP指令: pause")
         self.pause_btn.clicked.connect(self.pause_current)
-        control_layout.addWidget(self.pause_btn)
+        btn_row1.addWidget(self.pause_btn)
+        pause_cmd_label = QLabel("pause")
+        pause_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row1.addWidget(pause_cmd_label)
         
         self.stop_btn = QPushButton("⏹ 停止")
+        self.stop_btn.setToolTip("UDP指令: stop")
         self.stop_btn.clicked.connect(self.stop_current)
-        control_layout.addWidget(self.stop_btn)
+        btn_row1.addWidget(self.stop_btn)
+        stop_cmd_label = QLabel("stop")
+        stop_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row1.addWidget(stop_cmd_label)
         
         self.replay_btn = QPushButton("🔄 重播")
+        self.replay_btn.setToolTip("UDP指令: replay")
         self.replay_btn.clicked.connect(self.replay_current)
-        control_layout.addWidget(self.replay_btn)
+        btn_row1.addWidget(self.replay_btn)
+        replay_cmd_label = QLabel("replay")
+        replay_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row1.addWidget(replay_cmd_label)
+        control_layout.addLayout(btn_row1)
         
+        # 第二行按钮
+        btn_row2 = QHBoxLayout()
         self.fullscreen_btn2 = QPushButton("全屏")
+        self.fullscreen_btn2.setToolTip("UDP指令: fullscreen")
         self.fullscreen_btn2.clicked.connect(self.toggle_fullscreen_current)
-        control_layout.addWidget(self.fullscreen_btn2)
+        btn_row2.addWidget(self.fullscreen_btn2)
+        fs_cmd_label = QLabel("fullscreen")
+        fs_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row2.addWidget(fs_cmd_label)
         
         self.loop_btn = QPushButton("🔁 循环")
+        self.loop_btn.setToolTip("UDP指令: loop")
         self.loop_btn.setCheckable(True)
         self.loop_btn.clicked.connect(self.toggle_loop_current)
-        control_layout.addWidget(self.loop_btn)
+        btn_row2.addWidget(self.loop_btn)
+        loop_cmd_label = QLabel("loop")
+        loop_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row2.addWidget(loop_cmd_label)
+        
+        self.mute_btn2 = QPushButton("🔊 静音")
+        self.mute_btn2.setToolTip("UDP指令: mute / unmute")
+        self.mute_btn2.clicked.connect(self.toggle_mute_current)
+        btn_row2.addWidget(self.mute_btn2)
+        mute_cmd_label = QLabel("mute/unmute")
+        mute_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        btn_row2.addWidget(mute_cmd_label)
+        control_layout.addLayout(btn_row2)
+        
+        # UDP端口显示
+        self.cmd_port_label = QLabel("UDP端口: 8888 | TCP端口: 8892")
+        self.cmd_port_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
+        control_layout.addWidget(self.cmd_port_label)
         
         control_group.setLayout(control_layout)
         # 默认隐藏，窗口打开后才显示
@@ -1597,12 +1643,20 @@ class MainWindow(QMainWindow):
         switch_layout = QHBoxLayout()
         
         prev_btn = QPushButton("◀ 上一个")
+        prev_btn.setToolTip("UDP指令: prev")
         prev_btn.clicked.connect(self.prev_media)
         switch_layout.addWidget(prev_btn)
+        prev_cmd_label = QLabel("prev")
+        prev_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        switch_layout.addWidget(prev_cmd_label)
         
         next_btn = QPushButton("下一个 ▶")
+        next_btn.setToolTip("UDP指令: next")
         next_btn.clicked.connect(self.next_media)
         switch_layout.addWidget(next_btn)
+        next_cmd_label = QLabel("next")
+        next_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        switch_layout.addWidget(next_cmd_label)
         
         self.media_combo = QComboBox()
         self.media_combo.currentIndexChanged.connect(self.on_media_combo_changed)
@@ -1620,18 +1674,24 @@ class MainWindow(QMainWindow):
         volume_layout = QHBoxLayout()
         
         self.mute_btn = QPushButton("🔊 静音")
+        self.mute_btn.setToolTip("UDP指令: mute / unmute")
         self.mute_btn.clicked.connect(self.toggle_mute_current)
         volume_layout.addWidget(self.mute_btn)
         
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
+        self.volume_slider.setToolTip("UDP指令: volume 0-100")
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         volume_layout.addWidget(self.volume_slider, 1)
         
         self.volume_label = QLabel("80%")
         self.volume_label.setMinimumWidth(40)
         volume_layout.addWidget(self.volume_label)
+        
+        vol_cmd_label = QLabel("volume 0-100")
+        vol_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        volume_layout.addWidget(vol_cmd_label)
         
         volume_group.setLayout(volume_layout)
         # 默认隐藏，窗口打开后才显示
@@ -1728,69 +1788,6 @@ class MainWindow(QMainWindow):
         
         broadcast_group.setLayout(broadcast_layout)
         layout.addWidget(broadcast_group)
-        
-        # ===== 各窗口独立控制 =====
-        window_control_group = QGroupBox("各窗口独立控制")
-        window_control_layout = QVBoxLayout()
-        
-        for i in range(1, 5):
-            row_layout = QHBoxLayout()
-            
-            # 窗口标签
-            label = QLabel(f"窗口{i}")
-            label.setMinimumWidth(50)
-            row_layout.addWidget(label)
-            
-            # UDP端口
-            udp_label = QLabel(f"UDP:{WINDOW_UDP_PORTS[i-1]}")
-            udp_label.setStyleSheet("color: #666; font-size: 11px;")
-            row_layout.addWidget(udp_label)
-            
-            # TCP端口
-            tcp_label = QLabel(f"TCP:{WINDOW_TCP_PORTS[i-1]}")
-            tcp_label.setStyleSheet("color: #666; font-size: 11px;")
-            row_layout.addWidget(tcp_label)
-            
-            window_control_layout.addLayout(row_layout)
-            
-            # 控制按钮
-            btn_row = QHBoxLayout()
-            play_btn = QPushButton(f"播放")
-            play_btn.clicked.connect(lambda checked, w=i: self.play_window(w))
-            btn_row.addWidget(play_btn)
-            
-            stop_btn = QPushButton("停止")
-            stop_btn.clicked.connect(lambda checked, w=i: self.stop_window(w))
-            btn_row.addWidget(stop_btn)
-            
-            window_control_layout.addLayout(btn_row)
-        
-        window_control_group.setLayout(window_control_layout)
-        layout.addWidget(window_control_group)
-        
-        # ===== 快速命令 =====
-        quick_group = QGroupBox("快速命令")
-        quick_layout = QVBoxLayout()
-        
-        # 命令按钮网格
-        commands = [
-            ("播放", "play"),
-            ("暂停", "pause"),
-            ("停止", "stop"),
-            ("重播", "replay"),
-            ("下一个", "next"),
-            ("上一个", "prev"),
-            ("静音", "mute"),
-            ("取消静音", "unmute")
-        ]
-        
-        for text, cmd in commands:
-            btn = QPushButton(text)
-            btn.clicked.connect(lambda checked, c=cmd: self.send_command_to_current(c))
-            quick_layout.addWidget(btn)
-        
-        quick_group.setLayout(quick_layout)
-        layout.addWidget(quick_group)
         
         # ===== 日志显示 =====
         log_group = QGroupBox("通信日志")
@@ -1969,6 +1966,11 @@ class MainWindow(QMainWindow):
         
         # 更新播放控制标题
         self.control_group.setTitle(f"播放控制 → 窗口{window_id}")
+        
+        # 更新UDP/TCP端口显示
+        udp_port = WINDOW_UDP_PORTS[window_id - 1]
+        tcp_port = WINDOW_TCP_PORTS[window_id - 1]
+        self.cmd_port_label.setText(f"UDP端口: {udp_port} | TCP端口: {tcp_port}")
         
         # 更新自动打开复选框状态
         auto_open = self.config_manager.get_window_auto_open(window_id)
