@@ -1,0 +1,49 @@
+{
+  "main_window": {
+    "x": 224,
+    "y": 164,
+    "width": 1100,
+    "height": 800
+  },
+  "global_volume": 80,
+  "windows": {
+    "1": {
+      "media_files": [
+        "/root/screenshot_videoplay2.png"
+      ],
+      "is_open": true,
+      "position": {
+        "x": 1061,
+        "y": 275,
+        "width": 300,
+        "height": 600
+      },
+      "default_media": "/root/screenshot_videoplay2.png",
+      "media_settings": {
+        "1": {
+          "default": true,
+          "loop": false
+        }
+      }
+    },
+    "2": {
+      "is_open": true,
+      "media_files": [
+        "/root/test_video.mp4"
+      ],
+      "position": {
+        "x": 100,
+        "y": 100,
+        "width": 300,
+        "height": 600
+      }
+    },
+    "3": {
+      "is_open": false
+    },
+    "4": {
+      "is_open": false
+    }
+  },
+  "minimize_to_tray": false
+}

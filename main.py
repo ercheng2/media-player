@@ -943,8 +943,9 @@ class VideoWindow(QFrame):
         """重播"""
         self.stop()
         result = self.play()
-        # Linux下强制重新铺满
-        if platform.system() == 'Linux' and not self.use_vlc and hasattr(self, 'video_widget'):
+        if self.use_vlc:
+            QTimer.singleShot(500, self._safe_set_vlc_stretch)
+        elif platform.system() == 'Linux' and hasattr(self, 'video_widget'):
             QTimer.singleShot(300, self._force_video_stretch)
         return result
         
@@ -953,7 +954,9 @@ class VideoWindow(QFrame):
         if self.media_files:
             self.current_index = (self.current_index + 1) % len(self.media_files)
             result = self.play()
-            if platform.system() == 'Linux' and not self.use_vlc and hasattr(self, 'video_widget'):
+            if self.use_vlc:
+                QTimer.singleShot(500, self._safe_set_vlc_stretch)
+            elif platform.system() == 'Linux' and hasattr(self, 'video_widget'):
                 QTimer.singleShot(300, self._force_video_stretch)
             return result
         return False
@@ -963,7 +966,9 @@ class VideoWindow(QFrame):
         if self.media_files:
             self.current_index = (self.current_index - 1) % len(self.media_files)
             result = self.play()
-            if platform.system() == 'Linux' and not self.use_vlc and hasattr(self, 'video_widget'):
+            if self.use_vlc:
+                QTimer.singleShot(500, self._safe_set_vlc_stretch)
+            elif platform.system() == 'Linux' and hasattr(self, 'video_widget'):
                 QTimer.singleShot(300, self._force_video_stretch)
             return result
         return False
@@ -2263,7 +2268,8 @@ class MainWindow(QMainWindow):
         # 使用定时器检查按键（简化实现）
         self.hotkey_timer = QTimer()
         self.hotkey_timer.timeout.connect(self.check_hotkeys)
-        self.hotkey_timer.start(100)
+        if platform.system() == 'Windows':
+            self.hotkey_timer.start(100)
         
         # 记录上一个状态
         self.last_pageup_state = False
