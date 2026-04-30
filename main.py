@@ -79,7 +79,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.26"
+APP_VERSION = "v2.27"
 COMPANY_NAME = "北京方桑兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -472,33 +472,7 @@ class VideoWindow(QFrame):
         super().mouseReleaseEvent(event)
     
     def eventFilter(self, obj, event):
-        """事件过滤器：处理overlay上的鼠标事件，实现拖拽"""
-        from PyQt5.QtCore import QEvent
-        if obj == self.overlay:
-            et = event.type()
-            if et == QEvent.MouseButtonPress:
-                if event.button() == Qt.LeftButton:
-                    self.clicked.emit(self.window_id)
-                    self.setFocus()
-                    self.activateWindow()
-                    self.raise_()
-                    if not self.is_locked:
-                        self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-                        self.is_dragging = True
-                        VideoWindow._dragging_window = self
-                return True
-            elif et == QEvent.MouseButtonRelease:
-                if event.button() == Qt.LeftButton:
-                    self.is_dragging = False
-                    self.drag_position = None
-                    if VideoWindow._dragging_window == self:
-                        VideoWindow._dragging_window = None
-                return True
-            elif et == QEvent.MouseMove:
-                if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
-                    if self.drag_position:
-                        self.move(event.globalPos() - self.drag_position)
-                return True
+        """事件过滤器（备用）"""
         return super().eventFilter(obj, event)
         
     def init_ui(self):
@@ -523,19 +497,6 @@ class VideoWindow(QFrame):
         self.video_frame.setGeometry(0, 0, 800, 600)
         self.video_frame.show()
         
-        # 透明遮罩层：盖在video_frame上方，拦截鼠标事件
-        # VLC渲染到video_frame后会吞掉鼠标事件，eventFilter根本收不到
-        # 用透明遮罩层可以先把鼠标事件截住，再转发给VideoWindow处理拖拽
-        self.overlay = QWidget(self)
-        self.overlay.setStyleSheet("background-color: transparent;")
-        self.overlay.setGeometry(0, 0, 800, 600)
-        self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.overlay.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.overlay.setMouseTracking(True)
-        self.overlay.installEventFilter(self)
-        self.overlay.raise_()
-        self.overlay.show()
-        
         # 窗口编号标签（在视频上方）
         self.label_id = QLabel(f"窗口{self.window_id}", self)
         self.label_id.setStyleSheet("""
@@ -548,7 +509,7 @@ class VideoWindow(QFrame):
             }
         """)
         self.label_id.move(10, 10)
-        self.label_id.raise_()  # 确保在遮罩层上方
+        self.label_id.raise_()  # 确保在最上层
         self.label_id.show()
         
         # 设置初始大小和位置
@@ -564,10 +525,6 @@ class VideoWindow(QFrame):
         # 更新视频容器尺寸
         if hasattr(self, 'video_frame'):
             self.video_frame.setGeometry(0, 0, self.width(), self.height())
-        # 更新遮罩层尺寸（和视频容器同步）
-        if hasattr(self, 'overlay'):
-            self.overlay.setGeometry(0, 0, self.width(), self.height())
-            self.overlay.raise_()
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
@@ -588,6 +545,11 @@ class VideoWindow(QFrame):
             # 设置VLC事件管理器，监听播放结束事件
             self.vlc_events = self.vlc_player.event_manager()
             self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
+            
+            # Windows上：子类化video_frame的WndProc来拦截鼠标事件
+            # VLC渲染到video_frame后会吞掉鼠标事件，Qt的eventFilter收不到
+            # 用Win32子类化可以在Windows消息层面拦截，不影响VLC渲染
+            self._install_win32_mouse_hook()
         else:
             # PyQt5播放器
             self.media_player = QMediaPlayer()
@@ -598,6 +560,97 @@ class VideoWindow(QFrame):
         """设置窗口位置和大小"""
         self.move(int(x), int(y))
         self.resize(int(width), int(height))
+    
+    def _install_win32_mouse_hook(self):
+        """Windows上子类化video_frame的WndProc来拦截鼠标事件
+        
+        VLC渲染到video_frame后会吞掉鼠标事件，Qt的eventFilter根本收不到。
+        用Win32 SetWindowLongPtr子类化WndProc，在Windows消息层面拦截鼠标消息，
+        然后通过QTimer转发到Qt主线程处理拖拽逻辑。
+        这样既不影响VLC视频渲染，又能正常拖动窗口。
+        """
+        import platform
+        if platform.system() != 'Windows':
+            return
+        
+        try:
+            import ctypes
+            from ctypes import WINFUNCTYPE, c_long, c_void_p, c_uint
+            
+            user32 = ctypes.windll.user32
+            hwnd = int(self.video_frame.winId())
+            
+            if not hasattr(VideoWindow, '_win32_hooks'):
+                VideoWindow._win32_hooks = {}
+            
+            if hwnd in VideoWindow._win32_hooks:
+                return
+            
+            GWLP_WNDPROC = -4
+            WM_LBUTTONDOWN = 0x0201
+            WM_LBUTTONUP = 0x0202
+            WM_MOUSEMOVE = 0x0200
+            MK_LBUTTON = 0x0001
+            
+            WNDPROC = WINFUNCTYPE(c_long, c_void_p, c_uint, c_void_p, c_void_p)
+            
+            video_window = self
+            
+            def new_wndproc(hwnd_val, msg, wparam, lparam):
+                if msg == WM_LBUTTONDOWN:
+                    from PyQt5.QtCore import QPoint
+                    x = ctypes.c_short(lparam & 0xFFFF).value
+                    y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                    global_pos = video_window.video_frame.mapToGlobal(QPoint(x, y))
+                    QTimer.singleShot(0, lambda gp=global_pos: video_window._handle_frame_mouse_press(gp))
+                    return 0
+                
+                elif msg == WM_LBUTTONUP:
+                    QTimer.singleShot(0, lambda: video_window._handle_frame_mouse_release())
+                    return 0
+                
+                elif msg == WM_MOUSEMOVE and (wparam & MK_LBUTTON):
+                    from PyQt5.QtCore import QPoint
+                    x = ctypes.c_short(lparam & 0xFFFF).value
+                    y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                    global_pos = video_window.video_frame.mapToGlobal(QPoint(x, y))
+                    QTimer.singleShot(0, lambda gp=global_pos: video_window._handle_frame_mouse_move(gp))
+                    return 0
+                
+                # 其他消息传给原始WndProc
+                original = VideoWindow._win32_hooks[int(hwnd_val)][0]
+                return user32.CallWindowProcW(original, hwnd_val, msg, wparam, lparam)
+            
+            callback = WNDPROC(new_wndproc)
+            original = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, callback)
+            VideoWindow._win32_hooks[hwnd] = (original, callback)
+            
+        except Exception as e:
+            print(f"Win32鼠标钩子安装失败: {e}")
+    
+    def _handle_frame_mouse_press(self, global_pos):
+        """处理video_frame上的鼠标按下（由Win32子类化回调）"""
+        self.clicked.emit(self.window_id)
+        self.setFocus()
+        self.activateWindow()
+        self.raise_()
+        if not self.is_locked:
+            self.drag_position = global_pos - self.frameGeometry().topLeft()
+            self.is_dragging = True
+            VideoWindow._dragging_window = self
+    
+    def _handle_frame_mouse_move(self, global_pos):
+        """处理video_frame上的鼠标移动（由Win32子类化回调）"""
+        if self.is_dragging and not self.is_locked:
+            if self.drag_position:
+                self.move(global_pos - self.drag_position)
+    
+    def _handle_frame_mouse_release(self):
+        """处理video_frame上的鼠标释放（由Win32子类化回调）"""
+        self.is_dragging = False
+        self.drag_position = None
+        if VideoWindow._dragging_window == self:
+            VideoWindow._dragging_window = None
     
     def _on_vlc_end_reached(self, event):
         """VLC播放结束回调"""
@@ -1563,7 +1616,7 @@ class MainWindow(QMainWindow):
         media_group.setLayout(media_layout)
         layout.addWidget(media_group)
         
-        # ===== 播放控制（跟随当前窗口）=====
+        # ===== 播放控制（跟随当前窗口，仅窗口打开后显示）=====
         control_group = QGroupBox("播放控制 → 窗口1")
         control_group.setObjectName("control_group")
         self.control_group = control_group
@@ -1595,10 +1648,14 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.loop_btn)
         
         control_group.setLayout(control_layout)
+        # 默认隐藏，窗口打开后才显示
+        control_group.setVisible(False)
         layout.addWidget(control_group)
         
-        # ===== 视频切换 =====
+        # ===== 视频切换（仅窗口打开后显示）=====
         switch_group = QGroupBox("视频切换")
+        switch_group.setObjectName("switch_group")
+        self.switch_group = switch_group
         switch_layout = QHBoxLayout()
         
         prev_btn = QPushButton("◀ 上一个")
@@ -1614,10 +1671,14 @@ class MainWindow(QMainWindow):
         switch_layout.addWidget(self.media_combo, 1)
         
         switch_group.setLayout(switch_layout)
+        # 默认隐藏，窗口打开后才显示
+        switch_group.setVisible(False)
         layout.addWidget(switch_group)
         
-        # ===== 音量控制 =====
+        # ===== 音量控制（仅窗口打开后显示）=====
         volume_group = QGroupBox("独立音量控制")
+        volume_group.setObjectName("volume_group")
+        self.volume_group = volume_group
         volume_layout = QHBoxLayout()
         
         self.mute_btn = QPushButton("🔊 静音")
@@ -1635,6 +1696,8 @@ class MainWindow(QMainWindow):
         volume_layout.addWidget(self.volume_label)
         
         volume_group.setLayout(volume_layout)
+        # 默认隐藏，窗口打开后才显示
+        volume_group.setVisible(False)
         layout.addWidget(volume_group)
         
         # ===== 通信设置 =====
@@ -1936,8 +1999,14 @@ class MainWindow(QMainWindow):
         self.open_window_btn.setText(f"打开窗口{window_id}")
         self.delete_window_btn.setText(f"关闭窗口{window_id}")
         
+        # 根据窗口是否打开，显示/隐藏控制面板
+        is_open = window_id in self.video_windows
+        self.control_group.setVisible(is_open)
+        self.switch_group.setVisible(is_open)
+        self.volume_group.setVisible(is_open)
+        
         # 更新位置显示
-        if window_id in self.video_windows:
+        if is_open:
             x, y, w, h = self.video_windows[window_id].get_position()
             self.x_spin.blockSignals(True)
             self.y_spin.blockSignals(True)
@@ -2030,6 +2099,11 @@ class MainWindow(QMainWindow):
             window.raise_()
             window.activateWindow()
             
+            # 窗口已打开，显示控制面板
+            self.control_group.setVisible(True)
+            self.switch_group.setVisible(True)
+            self.volume_group.setVisible(True)
+            
             self.log(f"窗口{self.current_window_id}已打开")
     
     def on_video_window_clicked(self, window_id):
@@ -2051,6 +2125,10 @@ class MainWindow(QMainWindow):
                     self.select_window(list(self.video_windows.keys())[0])
                 else:
                     self.current_window_id = 1
+                    # 所有窗口都关了，隐藏控制面板
+                    self.control_group.setVisible(False)
+                    self.switch_group.setVisible(False)
+                    self.volume_group.setVisible(False)
                     self.update_media_list_display()
     
     def delete_current_window(self):
@@ -2080,6 +2158,10 @@ class MainWindow(QMainWindow):
                 self.select_window(list(self.video_windows.keys())[0])
             else:
                 self.current_window_id = 1
+                # 所有窗口都关了，隐藏控制面板
+                self.control_group.setVisible(False)
+                self.switch_group.setVisible(False)
+                self.volume_group.setVisible(False)
                 self.update_media_list_display()
         else:
             self.log(f"窗口{window_id}未打开，无需关闭")
