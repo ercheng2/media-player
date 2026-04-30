@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京方桑兄弟科技有限公司
 联系方式：18210234280
-版本：v2.2 - 修复图标路径和配置保存/加载问题
+版本：v2.33 - 控制面板从左侧移到右侧
 """
 
 import sys
@@ -1557,6 +1557,62 @@ class MainWindow(QMainWindow):
         media_group.setLayout(media_layout)
         layout.addWidget(media_group)
         
+        # ===== 通信设置 =====
+        comm_group = QGroupBox("通信设置")
+        comm_layout = QGridLayout()
+        
+        comm_layout.addWidget(QLabel("目标IP:"), 0, 0)
+        self.target_ip_edit = QLineEdit("192.168.1.3")
+        comm_layout.addWidget(self.target_ip_edit, 0, 1)
+        
+        comm_layout.addWidget(QLabel("UDP端口:"), 1, 0)
+        self.udp_port_spin = QSpinBox()
+        self.udp_port_spin.setRange(1, 65535)
+        self.udp_port_spin.setValue(8888)
+        comm_layout.addWidget(self.udp_port_spin, 1, 1)
+        
+        comm_layout.addWidget(QLabel("TCP端口:"), 2, 0)
+        self.tcp_port_spin = QSpinBox()
+        self.tcp_port_spin.setRange(1, 65535)
+        self.tcp_port_spin.setValue(8889)
+        comm_layout.addWidget(self.tcp_port_spin, 2, 1)
+        
+        # 串口设置
+        serial_layout = QHBoxLayout()
+        self.serial_port_combo = QComboBox()
+        self.serial_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
+        serial_layout.addWidget(self.serial_port_combo)
+        
+        self.serial_connect_btn = QPushButton("连接串口")
+        self.serial_connect_btn.clicked.connect(self.toggle_serial_connection)
+        serial_layout.addWidget(self.serial_connect_btn)
+        comm_layout.addLayout(serial_layout, 3, 0, 1, 2)
+        
+        comm_group.setLayout(comm_layout)
+        layout.addWidget(comm_group)
+        
+        layout.addStretch()
+        scroll.setWidget(widget)
+        
+        container = QWidget()
+        container_layout = QHBoxLayout()
+        container_layout.addWidget(scroll)
+        container.setLayout(container_layout)
+        
+        return container
+    
+    def create_right_panel(self):
+        """创建右侧通信面板"""
+        widget = QWidget()
+        widget.setMinimumWidth(350)
+        widget.setStyleSheet("""
+            QGroupBox {
+                margin-top: 15px;
+            }
+        """)
+        layout = QVBoxLayout()
+        widget.setLayout(layout)
+        
         # ===== 播放控制（跟随当前窗口，仅窗口打开后显示）=====
         control_group = QGroupBox("播放控制 → 窗口1")
         control_group.setObjectName("control_group")
@@ -1697,62 +1753,6 @@ class MainWindow(QMainWindow):
         # 默认隐藏，窗口打开后才显示
         volume_group.setVisible(False)
         layout.addWidget(volume_group)
-        
-        # ===== 通信设置 =====
-        comm_group = QGroupBox("通信设置")
-        comm_layout = QGridLayout()
-        
-        comm_layout.addWidget(QLabel("目标IP:"), 0, 0)
-        self.target_ip_edit = QLineEdit("192.168.1.3")
-        comm_layout.addWidget(self.target_ip_edit, 0, 1)
-        
-        comm_layout.addWidget(QLabel("UDP端口:"), 1, 0)
-        self.udp_port_spin = QSpinBox()
-        self.udp_port_spin.setRange(1, 65535)
-        self.udp_port_spin.setValue(8888)
-        comm_layout.addWidget(self.udp_port_spin, 1, 1)
-        
-        comm_layout.addWidget(QLabel("TCP端口:"), 2, 0)
-        self.tcp_port_spin = QSpinBox()
-        self.tcp_port_spin.setRange(1, 65535)
-        self.tcp_port_spin.setValue(8889)
-        comm_layout.addWidget(self.tcp_port_spin, 2, 1)
-        
-        # 串口设置
-        serial_layout = QHBoxLayout()
-        self.serial_port_combo = QComboBox()
-        self.serial_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
-        serial_layout.addWidget(self.serial_port_combo)
-        
-        self.serial_connect_btn = QPushButton("连接串口")
-        self.serial_connect_btn.clicked.connect(self.toggle_serial_connection)
-        serial_layout.addWidget(self.serial_connect_btn)
-        comm_layout.addLayout(serial_layout, 3, 0, 1, 2)
-        
-        comm_group.setLayout(comm_layout)
-        layout.addWidget(comm_group)
-        
-        layout.addStretch()
-        scroll.setWidget(widget)
-        
-        container = QWidget()
-        container_layout = QHBoxLayout()
-        container_layout.addWidget(scroll)
-        container.setLayout(container_layout)
-        
-        return container
-    
-    def create_right_panel(self):
-        """创建右侧通信面板"""
-        widget = QWidget()
-        widget.setMaximumWidth(280)
-        widget.setStyleSheet("""
-            QGroupBox {
-                margin-top: 15px;
-            }
-        """)
-        layout = QVBoxLayout()
-        widget.setLayout(layout)
         
         # ===== 广播控制全部窗口 =====
         broadcast_group = QGroupBox("广播控制全部")
