@@ -717,7 +717,7 @@ class VideoWindow(QFrame):
             if self.image_label.isVisible() and hasattr(self, '_current_image_path'):
                 pixmap = QPixmap(self._current_image_path)
                 if not pixmap.isNull():
-                    self.image_label.setPixmap(pixmap.scaled(self.width(), self.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    self.image_label.setPixmap(pixmap.scaled(self.width(), self.height(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
         # 更新VLC视频拉伸
         if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
             try:
@@ -849,7 +849,7 @@ class VideoWindow(QFrame):
             
             # 处理PPT文件
             if ext in ['.ppt', '.pptx']:
-                return self._show_ppt_not_supported()
+                return self._show_ppt()
             
             # 处理视频文件
             # 隐藏图片标签，显示视频容器
@@ -928,7 +928,7 @@ class VideoWindow(QFrame):
         self._current_image_path = file_path
         
         # 缩放图片以适应窗口
-        scaled_pixmap = pixmap.scaled(self.width(), self.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled_pixmap = pixmap.scaled(self.width(), self.height(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled_pixmap)
         self.image_label.show()
         self.video_frame.hide()
@@ -938,8 +938,84 @@ class VideoWindow(QFrame):
         self.is_playing = True
         return True
     
-    def _show_ppt_not_supported(self):
-        """显示PPT不支持提示"""
+
+    def _convert_ppt_to_images(self, ppt_path):
+        """将PPT转换为图片列表，返回图片路径列表"""
+        import hashlib
+        import subprocess
+        import fitz
+        
+        # 生成缓存目录
+        file_hash = hashlib.md5(open(ppt_path, 'rb').read()).hexdigest()[:8]
+        cache_dir = f"/tmp/ppt_slides/{file_hash}"
+        
+        # 如果已有缓存，直接返回
+        if os.path.exists(cache_dir) and os.listdir(cache_dir):
+            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.endswith('.png')])
+            if images:
+                return images
+        
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # 检查LibreOffice
+        soffice = None
+        for cmd in ['libreoffice', 'soffice']:
+            result = subprocess.run(['which', cmd], capture_output=True, text=True)
+            if result.returncode == 0:
+                soffice = cmd.strip()
+                break
+        
+        # Windows路径检查
+        if not soffice and platform.system() == 'Windows':
+            win_paths = [
+                r'C:\Program Files\LibreOffice\program\soffice.exe',
+                r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
+            ]
+            for wp in win_paths:
+                if os.path.exists(wp):
+                    soffice = wp
+                    break
+        
+        if not soffice:
+            return None  # 没有LibreOffice
+        
+        # PPT → PDF
+        try:
+            subprocess.run([soffice, '--headless', '--convert-to', 'pdf', ppt_path, '--outdir', cache_dir], 
+                           capture_output=True, timeout=120)
+        except Exception as e:
+            print(f"PPT转PDF失败: {e}")
+            return None
+        
+        # 找到生成的PDF
+        pdf_files = [f for f in os.listdir(cache_dir) if f.endswith('.pdf')]
+        if not pdf_files:
+            return None
+        
+        pdf_path = os.path.join(cache_dir, pdf_files[0])
+        
+        # PDF → 图片
+        try:
+            doc = fitz.open(pdf_path)
+            images = []
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                mat = fitz.Matrix(2, 2)  # 2x缩放，提高清晰度
+                pix = page.get_pixmap(matrix=mat)
+                img_path = os.path.join(cache_dir, f"slide_{page_num+1:03d}.png")
+                pix.save(img_path)
+                images.append(img_path)
+            doc.close()
+            # 删除PDF节省空间
+            os.remove(pdf_path)
+        except Exception as e:
+            print(f"PDF转图片失败: {e}")
+            return None
+        
+        return images
+
+    def _show_ppt(self, file_path):
+        """显示PPT文件"""
         # 停止视频播放
         try:
             if self.use_vlc:
@@ -949,18 +1025,92 @@ class VideoWindow(QFrame):
         except:
             pass
         
-        self.image_label.setText("PPT文件暂不支持预览\n请转换为视频或图片格式")
+        # 停止之前的PPT定时器
+        if hasattr(self, '_ppt_timer'):
+            self._ppt_timer.stop()
+        
+        # 显示加载提示
+        self.image_label.setText("正在加载PPT...")
         self.image_label.setStyleSheet("""
             background-color: black;
             color: white;
-            font-size: 18px;
+            font-size: 24px;
             font-weight: bold;
         """)
+        self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.show()
         self.video_frame.hide()
+        QApplication.processEvents()
+        
+        # 转换PPT为图片
+        images = self._convert_ppt_to_images(file_path)
+        
+        if images is None:
+            # 没有LibreOffice，显示提示
+            self.image_label.setText("PPT预览需要安装LibreOffice\n请安装后重试")
+            self.image_label.setStyleSheet("""
+                background-color: black;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            """)
+            self.is_playing = False
+            return False
+        
+        if not images:
+            self.image_label.setText("PPT转换失败\n请检查文件是否损坏")
+            self.image_label.setStyleSheet("""
+                background-color: black;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            """)
+            self.is_playing = False
+            return False
+        
+        # 保存PPT图片列表和当前页码
+        self._ppt_images = images
+        self._ppt_current_page = 0
+        self._current_image_path = images[0]
+        
+        # 显示第一页
+        self._show_ppt_page(0)
+        
+        # 设置自动翻页定时器（每5秒翻一页）
+        self._ppt_timer = QTimer()
+        self._ppt_timer.timeout.connect(self._ppt_next_page)
+        self._ppt_timer.start(5000)
+        
         self.is_playing = True
         return True
-    
+
+    def _show_ppt_page(self, page_index):
+        """显示PPT指定页"""
+        if not hasattr(self, '_ppt_images') or not self._ppt_images or page_index >= len(self._ppt_images):
+            return
+        
+        self._ppt_current_page = page_index
+        img_path = self._ppt_images[page_index]
+        self._current_image_path = img_path
+        
+        pixmap = QPixmap(img_path)
+        if not pixmap.isNull():
+            scaled_pixmap = pixmap.scaled(self.width(), self.height(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled_pixmap)
+            self.image_label.show()
+            self.video_frame.hide()
+        
+        # 更新窗口标题显示页码
+        if hasattr(self, 'label_id'):
+            self.label_id.setText(f"窗口{self.window_id} - PPT {page_index+1}/{len(self._ppt_images)}")
+
+    def _ppt_next_page(self):
+        """PPT自动翻页"""
+        if not hasattr(self, '_ppt_images') or not self._ppt_images:
+            return
+        next_page = (self._ppt_current_page + 1) % len(self._ppt_images)
+        self._show_ppt_page(next_page)
+
     def _safe_apply_volume(self):
         """安全地应用音量设置"""
         try:
@@ -1002,6 +1152,15 @@ class VideoWindow(QFrame):
                 delattr(self, '_current_image_path')
         if hasattr(self, 'video_frame'):
             self.video_frame.show()
+        
+        # 停止PPT翻页定时器
+        if hasattr(self, '_ppt_timer'):
+            self._ppt_timer.stop()
+        # 清理PPT相关属性
+        if hasattr(self, '_ppt_images'):
+            delattr(self, '_ppt_images')
+        if hasattr(self, '_ppt_current_page'):
+            delattr(self, '_ppt_current_page')
         
         try:
             if self.use_vlc:
@@ -1104,6 +1263,21 @@ class VideoWindow(QFrame):
         elif event.key() == Qt.Key_Return or event.key() == Qt.Key_F:
             self.toggle_fullscreen()
             event.accept()
+        # PPT翻页快捷键
+        elif event.key() == Qt.Key_Left:
+            if hasattr(self, '_ppt_images') and self._ppt_images:
+                prev_page = (self._ppt_current_page - 1) % len(self._ppt_images)
+                self._show_ppt_page(prev_page)
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        elif event.key() == Qt.Key_Right:
+            if hasattr(self, '_ppt_images') and self._ppt_images:
+                next_page = (self._ppt_current_page + 1) % len(self._ppt_images)
+                self._show_ppt_page(next_page)
+                event.accept()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
     
