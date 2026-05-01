@@ -15,27 +15,43 @@ import platform
 if not os.environ.get('VLC_PLUGIN_PATH') and platform.system() == 'Linux':
     os.environ['VLC_PLUGIN_PATH'] = '/usr/lib/x86_64-linux-gnu/vlc/plugins/'
 
-# PyInstaller打包后设置VLC路径
+# PyInstaller打包后设置VLC路径（必须在import vlc之前）
+# 注意：python-vlc如果PYTHON_VLC_LIB_PATH指向不存在的文件会sys.exit(1)直接退出！
 if getattr(sys, 'frozen', False):
     bundle_dir = sys._MEIPASS
-    vlc_path = os.path.join(bundle_dir, 'vlc')
-    if os.path.exists(vlc_path):
-        os.environ['PYTHON_VLC_MODULE_PATH'] = vlc_path
-        os.environ['PATH'] = vlc_path + os.pathsep + os.environ.get('PATH', '')
+    # 查找libvlc.dll - 优先_MEIPASS/vlc/，然后exe同级vlc/，然后系统VLC
+    _vlc_dll_candidates = [
+        os.path.join(bundle_dir, 'vlc', 'libvlc.dll'),
+        os.path.join(bundle_dir, 'libvlc.dll'),
+    ]
+    if platform.system() == 'Windows':
+        exe_dir = os.path.dirname(sys.executable)
+        _vlc_dll_candidates.extend([
+            os.path.join(exe_dir, 'vlc', 'libvlc.dll'),
+            os.path.join(exe_dir, 'libvlc.dll'),
+            r'C:\Program Files\VideoLAN\VLC\libvlc.dll',
+        ])
+    
+    _vlc_dll_found = None
+    for _p in _vlc_dll_candidates:
+        if os.path.exists(_p):
+            _vlc_dll_found = _p
+            print(f"找到VLC DLL: {_p}")
+            break
+    
+    if _vlc_dll_found:
+        # 设置python-vlc需要的环境变量（只有文件确实存在才设置！）
+        os.environ['PYTHON_VLC_LIB_PATH'] = _vlc_dll_found
+        _vlc_dir = os.path.dirname(_vlc_dll_found)
+        os.environ['PYTHON_VLC_MODULE_PATH'] = _vlc_dir
+        os.environ['PATH'] = _vlc_dir + os.pathsep + os.environ.get('PATH', '')
         if hasattr(os, 'add_dll_directory'):
-            os.add_dll_directory(vlc_path)
-    # 也尝试exe同级目录的vlc
-    exe_dir = os.path.dirname(sys.executable)
-    vlc_path2 = os.path.join(exe_dir, 'vlc')
-    if os.path.exists(vlc_path2) and vlc_path2 not in os.environ.get('PATH', ''):
-        os.environ['PATH'] = vlc_path2 + os.pathsep + os.environ.get('PATH', '')
-        if hasattr(os, 'add_dll_directory'):
-            os.add_dll_directory(vlc_path2)
-    # 直接在exe同级目录查找libvlc.dll
-    if os.path.exists(os.path.join(exe_dir, 'libvlc.dll')):
-        if hasattr(os, 'add_dll_directory'):
-            os.add_dll_directory(exe_dir)
-        os.environ['PATH'] = exe_dir + os.pathsep + os.environ.get('PATH', '')
+            try:
+                os.add_dll_directory(_vlc_dir)
+            except:
+                pass
+    else:
+        print("未找到VLC DLL，将使用QMediaPlayer内置播放器")
 
 import socket
 import struct
@@ -80,47 +96,14 @@ from PyQt5.QtNetwork import QUdpSocket, QTcpSocket, QTcpServer, QHostAddress
 
 # 尝试导入VLC
 VLC_AVAILABLE = False
-_vlc_dll_loaded = False
-
-if platform.system() == 'Windows':
-    # Windows下先确保libvlc.dll路径正确
-    import ctypes
-    try:
-        if getattr(sys, 'frozen', False):
-            # PyInstaller打包后
-            bundle_dir = sys._MEIPASS
-            vlc_subdir = os.path.join(bundle_dir, 'vlc')
-            # 先尝试vlc子目录
-            if os.path.exists(os.path.join(vlc_subdir, 'libvlc.dll')):
-                if hasattr(os, 'add_dll_directory'):
-                    os.add_dll_directory(vlc_subdir)
-                os.environ['PATH'] = vlc_subdir + os.pathsep + os.environ.get('PATH', '')
-                _vlc_dll_loaded = True
-                print(f"找到VLC DLL: {vlc_subdir}")
-            # 再尝试exe同级目录
-            exe_dir = os.path.dirname(sys.executable)
-            if os.path.exists(os.path.join(exe_dir, 'libvlc.dll')):
-                if hasattr(os, 'add_dll_directory'):
-                    os.add_dll_directory(exe_dir)
-                os.environ['PATH'] = exe_dir + os.pathsep + os.environ.get('PATH', '')
-                _vlc_dll_loaded = True
-                print(f"找到VLC DLL: {exe_dir}")
-        if not _vlc_dll_loaded:
-            # 尝试系统安装的VLC
-            sys_vlc = r"C:\Program Files\VideoLAN\VLC"
-            if os.path.exists(os.path.join(sys_vlc, 'libvlc.dll')):
-                if hasattr(os, 'add_dll_directory'):
-                    os.add_dll_directory(sys_vlc)
-                os.environ['PATH'] = sys_vlc + os.pathsep + os.environ.get('PATH', '')
-                _vlc_dll_loaded = True
-                print(f"找到系统VLC: {sys_vlc}")
-    except Exception as e:
-        print(f"VLC路径设置异常: {e}")
-
 try:
     import vlc
     VLC_AVAILABLE = True
     print("VLC模块导入成功")
+except SystemExit:
+    # python-vlc在找不到DLL时会sys.exit(1)，这里拦截
+    VLC_AVAILABLE = False
+    print("警告: VLC库加载失败(sys.exit)，将使用PyQt5内置播放器")
 except Exception as e:
     VLC_AVAILABLE = False
     print(f"警告: VLC库未安装({e})，将使用PyQt5内置播放器")
