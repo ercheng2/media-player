@@ -22,7 +22,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install pyinstaller python-vlc PyQt5 pyserial
+        pip install pyinstaller python-vlc PyQt5 pyserial PyMuPDF python-pptx
     
     - name: Install VLC
       run: |
@@ -33,7 +33,6 @@ jobs:
         $vlcPath = "C:\Program Files\VideoLAN\VLC"
         $destVlc = "vlc"
         New-Item -ItemType Directory -Path $destVlc -Force
-        # 只复制必要的DLL，不复制整个VLC目录（减小体积）
         $requiredFiles = @("libvlc.dll", "libvlccore.dll", "plugins")
         foreach ($f in $requiredFiles) {
           $src = Join-Path $vlcPath $f
@@ -42,27 +41,26 @@ jobs:
             Write-Host "Copied: $f"
           }
         }
-        # 列出vlc目录内容
         Get-ChildItem -Path $destVlc -Recurse | Select-Object FullName
     
     - name: Build EXE
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports main.py
+        pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports --hidden-import=fitz --hidden-import=pptx main.py
     
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v2.40
-        name: "坤展成-中控多窗口播放器 v2.40"
+        tag_name: v2.41
+        name: "坤展成-中控多窗口播放器 v2.41"
         body: |
-          Windows版本 - VLC安全加载修复
+          Windows版本 - 图片PPT铺满 + PPT翻页支持
           
           更新内容：
-          - VLC DLL路径检测修复
-          - 打包时内嵌VLC核心DLL
-          - 支持NO_VLC=1环境变量强制禁用VLC
-          - VLC加载失败自动回退QMediaPlayer
-          - 修复Windows打开窗口崩溃问题
+          - 图片铺满窗口（无黑边）
+          - PPT文件自动转图片播放
+          - PPT每5秒自动翻页，循环播放
+          - 支持左右方向键手动翻页
+          - 视频铺满窗口
         files: dist/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
