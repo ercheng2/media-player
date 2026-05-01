@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.39 - 修复Windows打开窗口崩溃(延迟VLC set_hwnd)
+版本：v2.40 - VLC安全加载+DLL路径修复+NO_VLC开关
 """
 
 import sys
@@ -79,12 +79,60 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtNetwork import QUdpSocket, QTcpSocket, QTcpServer, QHostAddress
 
 # 尝试导入VLC
+VLC_AVAILABLE = False
+_vlc_dll_loaded = False
+
+if platform.system() == 'Windows':
+    # Windows下先确保libvlc.dll路径正确
+    import ctypes
+    try:
+        if getattr(sys, 'frozen', False):
+            # PyInstaller打包后
+            bundle_dir = sys._MEIPASS
+            vlc_subdir = os.path.join(bundle_dir, 'vlc')
+            # 先尝试vlc子目录
+            if os.path.exists(os.path.join(vlc_subdir, 'libvlc.dll')):
+                if hasattr(os, 'add_dll_directory'):
+                    os.add_dll_directory(vlc_subdir)
+                os.environ['PATH'] = vlc_subdir + os.pathsep + os.environ.get('PATH', '')
+                _vlc_dll_loaded = True
+                print(f"找到VLC DLL: {vlc_subdir}")
+            # 再尝试exe同级目录
+            exe_dir = os.path.dirname(sys.executable)
+            if os.path.exists(os.path.join(exe_dir, 'libvlc.dll')):
+                if hasattr(os, 'add_dll_directory'):
+                    os.add_dll_directory(exe_dir)
+                os.environ['PATH'] = exe_dir + os.pathsep + os.environ.get('PATH', '')
+                _vlc_dll_loaded = True
+                print(f"找到VLC DLL: {exe_dir}")
+        if not _vlc_dll_loaded:
+            # 尝试系统安装的VLC
+            sys_vlc = r"C:\Program Files\VideoLAN\VLC"
+            if os.path.exists(os.path.join(sys_vlc, 'libvlc.dll')):
+                if hasattr(os, 'add_dll_directory'):
+                    os.add_dll_directory(sys_vlc)
+                os.environ['PATH'] = sys_vlc + os.pathsep + os.environ.get('PATH', '')
+                _vlc_dll_loaded = True
+                print(f"找到系统VLC: {sys_vlc}")
+    except Exception as e:
+        print(f"VLC路径设置异常: {e}")
+
 try:
     import vlc
     VLC_AVAILABLE = True
-except ImportError:
+    print("VLC模块导入成功")
+except Exception as e:
     VLC_AVAILABLE = False
-    print("警告: VLC库未安装，将使用PyQt5内置播放器")
+    print(f"警告: VLC库未安装({e})，将使用PyQt5内置播放器")
+
+# 环境变量NO_VLC=1可强制禁用VLC，用于排查问题
+if os.environ.get('NO_VLC') == '1':
+    VLC_AVAILABLE = False
+    print("NO_VLC=1，已强制禁用VLC，使用QMediaPlayer")
+
+# Linux下强制使用VLC（QMediaPlayer在Linux上GStreamer有问题）
+if platform.system() == 'Linux' and not VLC_AVAILABLE:
+    print("警告: Linux下强烈建议安装VLC，QMediaPlayer可能无法正常播放视频")
 
 # 尝试导入串口
 try:
@@ -712,9 +760,12 @@ class VideoWindow(QFrame):
                 self.vlc_events = self.vlc_player.event_manager()
                 self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
             except Exception as e:
-                print(f"VLC初始化失败: {e}")
+                print(f"VLC初始化失败，回退到QMediaPlayer: {e}")
                 self.use_vlc = False
         else:
+            self.use_vlc = False
+        
+        if not self.use_vlc:
             # PyQt5播放器 - 使用QVideoWidget作为视频输出
             # 直接放在VideoWindow上（不是video_frame），用setGeometry铺满
             self.video_widget = QVideoWidget(self)

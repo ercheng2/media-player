@@ -24,20 +24,26 @@ jobs:
       run: |
         pip install pyinstaller python-vlc PyQt5 pyserial
     
-    - name: Install VLC via Chocolatey
+    - name: Install VLC
       run: |
         choco install vlc -y --no-progress
     
-    - name: Copy VLC files
+    - name: Copy VLC DLLs to project
       run: |
         $vlcPath = "C:\Program Files\VideoLAN\VLC"
-        if (Test-Path $vlcPath) {
-          Copy-Item -Path $vlcPath -Destination "vlc" -Recurse
-          Write-Host "VLC copied successfully"
-        } else {
-          Write-Error "VLC not found at $vlcPath"
-          exit 1
+        $destVlc = "vlc"
+        New-Item -ItemType Directory -Path $destVlc -Force
+        # 只复制必要的DLL，不复制整个VLC目录（减小体积）
+        $requiredFiles = @("libvlc.dll", "libvlccore.dll", "plugins")
+        foreach ($f in $requiredFiles) {
+          $src = Join-Path $vlcPath $f
+          if (Test-Path $src) {
+            Copy-Item -Path $src -Destination (Join-Path $destVlc $f) -Recurse -Force
+            Write-Host "Copied: $f"
+          }
         }
+        # 列出vlc目录内容
+        Get-ChildItem -Path $destVlc -Recurse | Select-Object FullName
     
     - name: Build EXE
       run: |
@@ -46,9 +52,17 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v2.38
-        name: "坤展成-中控多窗口播放器 v2.38"
-        body: "Windows版本 - VLC播放器 + 视频铺满修复"
+        tag_name: v2.40
+        name: "坤展成-中控多窗口播放器 v2.40"
+        body: |
+          Windows版本 - VLC安全加载修复
+          
+          更新内容：
+          - VLC DLL路径检测修复
+          - 打包时内嵌VLC核心DLL
+          - 支持NO_VLC=1环境变量强制禁用VLC
+          - VLC加载失败自动回退QMediaPlayer
+          - 修复Windows打开窗口崩溃问题
         files: dist/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
