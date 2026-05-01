@@ -1,55 +1,66 @@
 {
-  "main_window": {
-    "x": 224,
-    "y": 164,
-    "width": 1100,
-    "height": 800
-  },
-  "global_volume": 80,
-  "windows": {
-    "1": {
-      "media_files": [
-        "/root/screenshot_videoplay2.png"
-      ],
-      "is_open": false,
-      "position": {
-        "x": 1061,
-        "y": 275,
-        "width": 300,
-        "height": 600
-      },
-      "default_media": "/root/screenshot_videoplay2.png",
-      "media_settings": {
+    "main_window": {
+        "x": 224,
+        "y": 164,
+        "width": 1100,
+        "height": 800
+    },
+    "global_volume": 80,
+    "windows": {
         "1": {
-          "default": true,
-          "loop": false
+            "media_files": [
+                "/tmp/test_fill_image.png",
+                "/tmp/test_demo.pptx",
+                "/root/test_video.mp4"
+            ],
+            "is_open": true,
+            "position": {
+                "x": 50,
+                "y": 50,
+                "width": 600,
+                "height": 400
+            },
+            "default_media": "/tmp/test_fill_image.png",
+            "media_settings": {
+                "1": {
+                    "default": true,
+                    "loop": false
+                },
+                "2": {
+                    "default": false,
+                    "loop": false
+                },
+                "3": {
+                    "default": false,
+                    "loop": false
+                }
+            },
+            "auto_open": true
+        },
+        "2": {
+            "is_open": false,
+            "media_files": [
+                "/root/test_video.mp4"
+            ],
+            "position": {
+                "x": 100,
+                "y": 100,
+                "width": 300,
+                "height": 600
+            },
+            "media_settings": {
+                "1": {
+                    "default": false,
+                    "loop": true
+                }
+            }
+        },
+        "3": {
+            "is_open": false
+        },
+        "4": {
+            "is_open": false
         }
-      }
     },
-    "2": {
-      "is_open": false,
-      "media_files": [
-        "/root/test_video.mp4"
-      ],
-      "position": {
-        "x": 100,
-        "y": 100,
-        "width": 300,
-        "height": 600
-      },
-      "media_settings": {
-        "1": {
-          "default": false,
-          "loop": true
-        }
-      }
-    },
-    "3": {
-      "is_open": false
-    },
-    "4": {
-      "is_open": false
-    }
-  },
-  "minimize_to_tray": false
+    "minimize_to_tray": false
 }
