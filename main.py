@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.38 - Linux切换到VLC播放器(set_xwindow)解决视频铺满问题
+版本：v2.39 - 修复Windows打开窗口崩溃(延迟VLC set_hwnd)
 """
 
 import sys
@@ -24,6 +24,18 @@ if getattr(sys, 'frozen', False):
         os.environ['PATH'] = vlc_path + os.pathsep + os.environ.get('PATH', '')
         if hasattr(os, 'add_dll_directory'):
             os.add_dll_directory(vlc_path)
+    # 也尝试exe同级目录的vlc
+    exe_dir = os.path.dirname(sys.executable)
+    vlc_path2 = os.path.join(exe_dir, 'vlc')
+    if os.path.exists(vlc_path2) and vlc_path2 not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = vlc_path2 + os.pathsep + os.environ.get('PATH', '')
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(vlc_path2)
+    # 直接在exe同级目录查找libvlc.dll
+    if os.path.exists(os.path.join(exe_dir, 'libvlc.dll')):
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(exe_dir)
+        os.environ['PATH'] = exe_dir + os.pathsep + os.environ.get('PATH', '')
 
 import socket
 import struct
@@ -686,21 +698,22 @@ class VideoWindow(QFrame):
         """初始化播放器"""
         if VLC_AVAILABLE:
             # VLC播放器
-            if platform.system() == 'Linux':
-                self.vlc_instance = vlc.Instance('--no-video-title-show --vout xcb_x11 --avcodec-hw=none')
-            else:
-                self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
-            self.vlc_player = self.vlc_instance.media_player_new()
-            # 渲染到video_frame控件上（Linux用set_xwindow，Windows用set_hwnd）
-            if platform.system() == 'Linux':
-                self.vlc_player.set_xwindow(int(self.video_frame.winId()))
-            else:
-                self.vlc_player.set_hwnd(int(self.video_frame.winId()))
-            self.use_vlc = True
-            
-            # 设置VLC事件管理器，监听播放结束事件
-            self.vlc_events = self.vlc_player.event_manager()
-            self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
+            try:
+                if platform.system() == 'Linux':
+                    self.vlc_instance = vlc.Instance('--no-video-title-show --vout xcb_x11 --avcodec-hw=none')
+                else:
+                    self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
+                self.vlc_player = self.vlc_instance.media_player_new()
+                # 渲染窗口句柄延迟到showEvent中设置，避免窗口未show时winId无效
+                self._vlc_hwnd_set = False
+                self.use_vlc = True
+                
+                # 设置VLC事件管理器，监听播放结束事件
+                self.vlc_events = self.vlc_player.event_manager()
+                self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
+            except Exception as e:
+                print(f"VLC初始化失败: {e}")
+                self.use_vlc = False
         else:
             # PyQt5播放器 - 使用QVideoWidget作为视频输出
             # 直接放在VideoWindow上（不是video_frame），用setGeometry铺满
@@ -716,6 +729,21 @@ class VideoWindow(QFrame):
             self.media_player.stateChanged.connect(self._on_qt_state_changed)
             self.use_vlc = False
         
+    def showEvent(self, event):
+        """窗口显示事件 - 延迟设置VLC渲染窗口句柄"""
+        super().showEvent(event)
+        # 首次show时设置VLC窗口句柄（需要有效winId）
+        if hasattr(self, 'vlc_player') and self.use_vlc and not self._vlc_hwnd_set:
+            try:
+                if platform.system() == 'Linux':
+                    self.vlc_player.set_xwindow(int(self.video_frame.winId()))
+                else:
+                    self.vlc_player.set_hwnd(int(self.video_frame.winId()))
+                self._vlc_hwnd_set = True
+                print(f"VLC窗口句柄已设置: {self.video_frame.winId()}")
+            except Exception as e:
+                print(f"设置VLC窗口句柄失败: {e}")
+    
     def set_position(self, x, y, width, height):
         """设置窗口位置和大小"""
         self.move(int(x), int(y))
@@ -805,6 +833,17 @@ class VideoWindow(QFrame):
                     self.vlc_player.stop()
                 except:
                     pass
+                
+                # 确保VLC窗口句柄已设置
+                if hasattr(self, '_vlc_hwnd_set') and not self._vlc_hwnd_set:
+                    try:
+                        if platform.system() == 'Linux':
+                            self.vlc_player.set_xwindow(int(self.video_frame.winId()))
+                        else:
+                            self.vlc_player.set_hwnd(int(self.video_frame.winId()))
+                        self._vlc_hwnd_set = True
+                    except Exception as e:
+                        print(f"播放时设置VLC窗口句柄失败: {e}")
                 
                 media = self.vlc_instance.media_new(file_path)
                 # 添加选项让视频拉伸填充窗口

@@ -11,7 +11,7 @@
       "media_files": [
         "/root/screenshot_videoplay2.png"
       ],
-      "is_open": true,
+      "is_open": false,
       "position": {
         "x": 1061,
         "y": 275,
@@ -27,7 +27,7 @@
       }
     },
     "2": {
-      "is_open": true,
+      "is_open": false,
       "media_files": [
         "/root/test_video.mp4"
       ],
