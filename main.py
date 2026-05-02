@@ -849,7 +849,7 @@ class VideoWindow(QFrame):
             
             # 处理PPT文件
             if ext in ['.ppt', '.pptx']:
-                return self._show_ppt()
+                return self._show_ppt(file_path)
             
             # 处理视频文件
             # 隐藏图片标签，显示视频容器
