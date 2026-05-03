@@ -50,17 +50,10 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v2.41-fix-fix
-        name: "坤展成-中控多窗口播放器 v2.41-fix"
+        tag_name: ${{ github.ref_name }}
+        name: "坤展成-中控多窗口播放器 ${{ github.ref_name }}"
         body: |
-          Windows版本 - 图片PPT铺满 + PPT翻页支持
-          
-          更新内容：
-          - 图片铺满窗口（无黑边）
-          - PPT文件自动转图片播放
-          - PPT每5秒自动翻页，循环播放
-          - 支持左右方向键手动翻页
-          - 视频铺满窗口
+          v${{ github.ref_name }} - 修复PPT加载卡死+循环播放不生效+点击窗口报错
         files: dist/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
