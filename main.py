@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.43 - PPT用win32com优先+循环播放修复+点击防抖
+版本：v2.45 - 修复双击窗口卡死+循环播放防重入+点击释放触发
 """
 
 import sys
@@ -577,35 +577,43 @@ class VideoWindow(QFrame):
                         geo.y() <= my < geo.y() + geo.height())
             
             if left_down and not self.last_left_down:
-                # 鼠标按下
+                # 鼠标按下 - 记录按下位置，不emit clicked
                 if in_window:
-                    if not self.click_pending:
-                        self.click_pending = True
-                        self.clicked.emit(self.window_id)
+                    self._click_in_window = True  # 标记按下时在窗口内
                     if not self.is_locked:
                         from PyQt5.QtCore import QPoint
                         self.drag_position = QPoint(mx - geo.x(), my - geo.y())
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
+                else:
+                    self._click_in_window = False
             elif not left_down and self.last_left_down:
-                # 鼠标释放
+                # 鼠标释放 - 如果按下时在窗口内且没有拖动过，算作点击
+                if getattr(self, '_click_in_window', False) and not self.is_dragging:
+                    # 防抖：300ms内不重复emit
+                    import time
+                    now = time.time()
+                    if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.3:
+                        self._last_emit_time = now
+                        self.clicked.emit(self.window_id)
                 self.is_dragging = False
                 self.drag_position = None
-                self.click_pending = False
+                self._click_in_window = False
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
             elif left_down and self.is_dragging and not self.is_locked:
-                # 拖动中
+                # 拖动中 - 标记拖动过，不再算点击
                 if self.drag_position:
                     from PyQt5.QtCore import QPoint
                     self.move(QPoint(mx - self.drag_position.x(), my - self.drag_position.y()))
+                    self._click_in_window = False  # 拖动了不算点击
             
             self.last_left_down = left_down
-        except:
+        except Exception as e:
             self.is_dragging = False
             self.drag_position = None
             self.last_left_down = False
-            self.click_pending = False
+            self._click_in_window = False
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
     
@@ -814,6 +822,10 @@ class VideoWindow(QFrame):
     
     def _loop_replay(self):
         """循环播放重播 - 用set_time/setPosition回到开头，避免stop+play状态冲突"""
+        # 防重入：如果上次loop_replay还在执行中，跳过
+        if getattr(self, '_loop_replaying', False):
+            return
+        self._loop_replaying = True
         try:
             if self.use_vlc:
                 # VLC: 直接设回起点播放，不stop
@@ -823,13 +835,21 @@ class VideoWindow(QFrame):
                 QTimer.singleShot(500, self._safe_set_vlc_stretch)
             else:
                 # QMediaPlayer: setPosition回到开头
-                from PyQt5.QtCore import QUrl
-                from PyQt5.QtMultimedia import QMediaContent
                 self.media_player.setPosition(0)
                 self.media_player.play()
         except Exception as e:
             print(f"循环重播失败，fallback到replay: {e}")
-            self.replay()
+            try:
+                self.replay()
+            except:
+                pass
+        finally:
+            # 延迟解锁，防止VLC回调过快
+            QTimer.singleShot(500, self._unlock_loop_replay)
+    
+    def _unlock_loop_replay(self):
+        """解锁循环重播"""
+        self._loop_replaying = False
         
     def set_media_files(self, files):
         """设置媒体文件列表"""
