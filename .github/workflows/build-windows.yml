@@ -22,7 +22,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install pyinstaller python-vlc PyQt5 pyserial PyMuPDF python-pptx
+        pip install pyinstaller python-vlc PyQt5 pyserial PyMuPDF python-pptx pywin32 comtypes
     
     - name: Install VLC
       run: |
@@ -45,7 +45,7 @@ jobs:
     
     - name: Build EXE
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports --hidden-import=fitz --hidden-import=pptx main.py
+        pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports --hidden-import=fitz --hidden-import=pptx --hidden-import=win32com.client --hidden-import=pythoncom --hidden-import=comtypes.client main.py
     
     - name: Create Release
       uses: softprops/action-gh-release@v2
@@ -53,7 +53,7 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: "坤展成-中控多窗口播放器 ${{ github.ref_name }}"
         body: |
-          v${{ github.ref_name }} - 修复PPT加载卡死+循环播放不生效+点击窗口报错
+          v2.43 - PPT用win32com优先+循环播放修复+点击防抖
         files: dist/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

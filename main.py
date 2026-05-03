@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.42 - PPT后台加载+循环播放修复+点击防抖
+版本：v2.43 - PPT用win32com优先+循环播放修复+点击防抖
 """
 
 import sys
@@ -989,42 +989,93 @@ class VideoWindow(QFrame):
         return self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
-        """Windows下用PowerPoint COM转换PPT为图片"""
+        """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
+        # 方案1：win32com（pywin32，最稳定）
+        try:
+            import win32com.client
+            import pythoncom
+            pythoncom.CoInitialize()
+            
+            try:
+                powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+                # 有些系统需要设置Visible=False但不支持，用try保护
+                try:
+                    powerpoint.Visible = False
+                except:
+                    pass
+                
+                abs_path = os.path.abspath(ppt_path)
+                abs_cache = os.path.abspath(cache_dir)
+                
+                presentation = powerpoint.Presentations.Open(
+                    abs_path,
+                    WithWindow=False,
+                    ReadOnly=True
+                )
+                
+                # 导出为PNG图片（ppShapeFormat=2表示PNG）
+                # Export参数: Path, Filter, ScaleWidth, ScaleHeight
+                presentation.Export(abs_cache, "PNG")
+                presentation.Close()
+                
+                # 收集导出的图片
+                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+                if images:
+                    return images
+            except Exception as e:
+                print(f"win32com PowerPoint转换失败: {e}")
+            finally:
+                try:
+                    powerpoint.Quit()
+                except:
+                    pass
+                pythoncom.CoUninitialize()
+        except ImportError:
+            print("win32com未安装，尝试comtypes")
+        
+        # 方案2：comtypes
         try:
             import comtypes.client
             import pythoncom
             pythoncom.CoInitialize()
             
-            powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
-            powerpoint.Visible = False
-            
-            presentation = powerpoint.Presentations.Open(
-                os.path.abspath(ppt_path),
-                WithWindow=False
-            )
-            
-            # 导出为PNG图片
-            export_path = os.path.abspath(cache_dir)
-            presentation.Export(export_path, "PNG")
-            presentation.Close()
-            powerpoint.Quit()
-            
-            pythoncom.CoUninitialize()
-            
-            # 收集导出的图片
-            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
-            return images if images else None
-            
+            try:
+                powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
+                try:
+                    powerpoint.Visible = False
+                except:
+                    pass
+                
+                abs_path = os.path.abspath(ppt_path)
+                abs_cache = os.path.abspath(cache_dir)
+                
+                presentation = powerpoint.Presentations.Open(
+                    abs_path,
+                    WithWindow=False
+                )
+                
+                presentation.Export(abs_cache, "PNG")
+                presentation.Close()
+                powerpoint.Quit()
+                
+                pythoncom.CoUninitialize()
+                
+                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+                if images:
+                    return images
+            except Exception as e:
+                print(f"comtypes PowerPoint转换失败: {e}")
         except ImportError:
-            print("comtypes未安装，跳过PowerPoint COM方案")
-            return None
+            print("comtypes也未安装")
         except Exception as e:
-            print(f"PowerPoint COM转换失败: {e}")
+            print(f"comtypes方案失败: {e}")
+        finally:
             try:
                 pythoncom.CoUninitialize()
             except:
                 pass
-            return None
+        
+        return None
     
     def _convert_ppt_with_libreoffice(self, ppt_path, cache_dir):
         """LibreOffice方案转换PPT"""
