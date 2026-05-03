@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.41 - VLC安全加载+DLL路径修复+NO_VLC开关
+版本：v2.42 - 修复PPT加载卡死+循环播放不生效+点击窗口报错
 """
 
 import sys
@@ -128,7 +128,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.36"
+APP_VERSION = "v2.42"
 COMPANY_NAME = "北京万乘兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -784,17 +784,34 @@ class VideoWindow(QFrame):
         self.resize(int(width), int(height))
     
     def _on_vlc_end_reached(self, event):
-        """VLC播放结束回调"""
-        if self.loop_play and self.is_playing:
-            self.is_playing = False  # 先标记为未播放
-            # 使用QTimer在主线程中重新播放，延迟200ms避免VLC状态冲突
-            QTimer.singleShot(200, self.replay)
+        """VLC播放结束回调 - 修复循环播放"""
+        if self.loop_play:
+            # 不修改is_playing，避免状态冲突
+            # 使用QTimer回到主线程重新播放，延迟300ms确保VLC状态稳定
+            QTimer.singleShot(300, self._loop_replay)
+    
+    def _loop_replay(self):
+        """循环播放重播 - 使用set_time(0)代替stop()+play()"""
+        if self.loop_play:
+            try:
+                if self.use_vlc:
+                    self.vlc_player.set_time(0)  # 回到开头
+                    self.vlc_player.play()
+                    QTimer.singleShot(300, self._safe_apply_volume)
+                    QTimer.singleShot(500, self._safe_set_vlc_stretch)
+                else:
+                    self.media_player.setPosition(0)
+                    self.media_player.play()
+            except Exception as e:
+                # fallback: stop + play
+                print(f"循环播放重播失败，回退到stop+play: {e}")
+                self.replay()
     
     def _on_qt_state_changed(self, state):
-        """Qt播放器状态改变回调"""
+        """Qt播放器状态改变回调 - 修复循环播放"""
         from PyQt5.QtMultimedia import QMediaPlayer
-        if state == QMediaPlayer.StoppedState and self.loop_play and self.is_playing:
-            QTimer.singleShot(100, self.replay)
+        if state == QMediaPlayer.StoppedState and self.loop_play:
+            QTimer.singleShot(200, self._loop_replay)
     
     def _force_video_stretch(self):
         """Linux下强制视频铺满窗口 - 通过resize触发GStreamer重新布局"""
@@ -940,7 +957,7 @@ class VideoWindow(QFrame):
     
 
     def _convert_ppt_to_images(self, ppt_path):
-        """将PPT转换为图片列表，返回图片路径列表"""
+        """将PPT转换为图片列表，返回图片路径列表 - 修复卡死问题"""
         import hashlib
         import subprocess
         import fitz
@@ -956,6 +973,11 @@ class VideoWindow(QFrame):
                 return images
         
         os.makedirs(cache_dir, exist_ok=True)
+        
+        # 检查LibreOffice锁文件（如果正在运行，直接返回None）
+        if self._check_libreoffice_lock():
+            print("LibreOffice正在运行中，请先关闭LibreOffice")
+            return None
         
         # 检查LibreOffice
         soffice = None
@@ -979,10 +1001,13 @@ class VideoWindow(QFrame):
         if not soffice:
             return None  # 没有LibreOffice
         
-        # PPT → PDF
+        # PPT → PDF（使用--norestore参数，timeout从120秒降到60秒）
         try:
-            subprocess.run([soffice, '--headless', '--convert-to', 'pdf', ppt_path, '--outdir', cache_dir], 
-                           capture_output=True, timeout=120)
+            subprocess.run([soffice, '--headless', '--norestore', '--convert-to', 'pdf', ppt_path, '--outdir', cache_dir], 
+                           capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            print("PPT转PDF超时(60秒)，LibreOffice可能卡住了")
+            return None
         except Exception as e:
             print(f"PPT转PDF失败: {e}")
             return None
@@ -1013,6 +1038,35 @@ class VideoWindow(QFrame):
             return None
         
         return images
+    
+    def _check_libreoffice_lock(self):
+        """检查LibreOffice锁文件，返回True表示正在运行"""
+        try:
+            if platform.system() == 'Windows':
+                lock_paths = [
+                    os.path.expanduser('~/.config/libreoffice'),
+                    os.path.join(os.environ.get('APPDATA', ''), 'LibreOffice'),
+                ]
+            else:
+                lock_paths = [
+                    os.path.expanduser('~/.config/libreoffice'),
+                    '/tmp/.libreoffice',
+                ]
+            
+            for lock_dir in lock_paths:
+                if os.path.exists(lock_dir):
+                    # 检查.lock文件
+                    lock_file = os.path.join(lock_dir, '.lock')
+                    if os.path.exists(lock_file):
+                        return True
+                    # 检查子目录中的锁文件
+                    for root, dirs, files in os.walk(lock_dir):
+                        for f in files:
+                            if f.endswith('.lock'):
+                                return True
+        except Exception as e:
+            print(f"检查锁文件失败: {e}")
+        return False
 
     def _show_ppt(self, file_path):
         """显示PPT文件"""
@@ -2714,12 +2768,21 @@ class MainWindow(QMainWindow):
             self.log(f"窗口{self.current_window_id}已打开")
     
     def on_video_window_clicked(self, window_id):
-        """视频窗口被点击"""
-        self.select_window(window_id)
-        # 更新标签选中状态
-        btn = self.window_tabs.button(window_id)
-        if btn:
-            btn.setChecked(True)
+        """视频窗口被点击 - 添加300ms防抖"""
+        import time
+        now = time.time()
+        if hasattr(self, '_last_click_time') and now - self._last_click_time < 0.3:
+            return  # 300ms防抖，避免频繁点击
+        self._last_click_time = now
+        
+        try:
+            self.select_window(window_id)
+            # 更新标签选中状态
+            btn = self.window_tabs.button(window_id)
+            if btn:
+                btn.setChecked(True)
+        except Exception as e:
+            print(f"窗口点击处理异常: {e}")
     
     def on_video_window_closed(self, window_id):
         """视频窗口被关闭"""
