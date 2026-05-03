@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.42 - 修复PPT加载卡死+循环播放不生效+点击窗口报错
+版本：v2.42 - PPT后台加载+循环播放修复+点击防抖
 """
 
 import sys
@@ -128,7 +128,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.42"
+APP_VERSION = "v2.36"
 COMPANY_NAME = "北京万乘兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -784,34 +784,20 @@ class VideoWindow(QFrame):
         self.resize(int(width), int(height))
     
     def _on_vlc_end_reached(self, event):
-        """VLC播放结束回调 - 修复循环播放"""
+        """VLC播放结束回调"""
         if self.loop_play:
-            # 不修改is_playing，避免状态冲突
-            # 使用QTimer回到主线程重新播放，延迟300ms确保VLC状态稳定
+            # 循环播放：直接回开头重播，不修改is_playing
             QTimer.singleShot(300, self._loop_replay)
-    
-    def _loop_replay(self):
-        """循环播放重播 - 使用set_time(0)代替stop()+play()"""
-        if self.loop_play:
-            try:
-                if self.use_vlc:
-                    self.vlc_player.set_time(0)  # 回到开头
-                    self.vlc_player.play()
-                    QTimer.singleShot(300, self._safe_apply_volume)
-                    QTimer.singleShot(500, self._safe_set_vlc_stretch)
-                else:
-                    self.media_player.setPosition(0)
-                    self.media_player.play()
-            except Exception as e:
-                # fallback: stop + play
-                print(f"循环播放重播失败，回退到stop+play: {e}")
-                self.replay()
+        else:
+            self.is_playing = False
     
     def _on_qt_state_changed(self, state):
-        """Qt播放器状态改变回调 - 修复循环播放"""
+        """Qt播放器状态改变回调"""
         from PyQt5.QtMultimedia import QMediaPlayer
         if state == QMediaPlayer.StoppedState and self.loop_play:
-            QTimer.singleShot(200, self._loop_replay)
+            QTimer.singleShot(100, self._loop_replay)
+        elif state == QMediaPlayer.StoppedState:
+            self.is_playing = False
     
     def _force_video_stretch(self):
         """Linux下强制视频铺满窗口 - 通过resize触发GStreamer重新布局"""
@@ -825,6 +811,25 @@ class VideoWindow(QFrame):
         """切换循环播放"""
         self.loop_play = not self.loop_play
         return self.loop_play
+    
+    def _loop_replay(self):
+        """循环播放重播 - 用set_time/setPosition回到开头，避免stop+play状态冲突"""
+        try:
+            if self.use_vlc:
+                # VLC: 直接设回起点播放，不stop
+                self.vlc_player.set_time(0)
+                self.vlc_player.play()
+                QTimer.singleShot(300, self._safe_apply_volume)
+                QTimer.singleShot(500, self._safe_set_vlc_stretch)
+            else:
+                # QMediaPlayer: setPosition回到开头
+                from PyQt5.QtCore import QUrl
+                from PyQt5.QtMultimedia import QMediaContent
+                self.media_player.setPosition(0)
+                self.media_player.play()
+        except Exception as e:
+            print(f"循环重播失败，fallback到replay: {e}")
+            self.replay()
         
     def set_media_files(self, files):
         """设置媒体文件列表"""
@@ -957,7 +962,7 @@ class VideoWindow(QFrame):
     
 
     def _convert_ppt_to_images(self, ppt_path):
-        """将PPT转换为图片列表，返回图片路径列表 - 修复卡死问题"""
+        """将PPT转换为图片列表，返回图片路径列表"""
         import hashlib
         import subprocess
         import fitz
@@ -974,21 +979,61 @@ class VideoWindow(QFrame):
         
         os.makedirs(cache_dir, exist_ok=True)
         
-        # 检查LibreOffice锁文件（如果正在运行，直接返回None）
-        if self._check_libreoffice_lock():
-            print("LibreOffice正在运行中，请先关闭LibreOffice")
+        # Windows优先用PowerPoint COM自动化
+        if platform.system() == 'Windows':
+            images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
+            if images is not None:
+                return images
+        
+        # 回退到LibreOffice方案
+        return self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
+    
+    def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
+        """Windows下用PowerPoint COM转换PPT为图片"""
+        try:
+            import comtypes.client
+            import pythoncom
+            pythoncom.CoInitialize()
+            
+            powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
+            powerpoint.Visible = False
+            
+            presentation = powerpoint.Presentations.Open(
+                os.path.abspath(ppt_path),
+                WithWindow=False
+            )
+            
+            # 导出为PNG图片
+            export_path = os.path.abspath(cache_dir)
+            presentation.Export(export_path, "PNG")
+            presentation.Close()
+            powerpoint.Quit()
+            
+            pythoncom.CoUninitialize()
+            
+            # 收集导出的图片
+            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+            return images if images else None
+            
+        except ImportError:
+            print("comtypes未安装，跳过PowerPoint COM方案")
             return None
+        except Exception as e:
+            print(f"PowerPoint COM转换失败: {e}")
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+            return None
+    
+    def _convert_ppt_with_libreoffice(self, ppt_path, cache_dir):
+        """LibreOffice方案转换PPT"""
+        import subprocess
+        import fitz
         
         # 检查LibreOffice
         soffice = None
-        for cmd in ['libreoffice', 'soffice']:
-            result = subprocess.run(['which', cmd], capture_output=True, text=True)
-            if result.returncode == 0:
-                soffice = cmd.strip()
-                break
-        
-        # Windows路径检查
-        if not soffice and platform.system() == 'Windows':
+        if platform.system() == 'Windows':
             win_paths = [
                 r'C:\Program Files\LibreOffice\program\soffice.exe',
                 r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
@@ -997,16 +1042,23 @@ class VideoWindow(QFrame):
                 if os.path.exists(wp):
                     soffice = wp
                     break
+        else:
+            for cmd in ['libreoffice', 'soffice']:
+                result = subprocess.run(['which', cmd], capture_output=True, text=True)
+                if result.returncode == 0:
+                    soffice = cmd.strip()
+                    break
         
         if not soffice:
             return None  # 没有LibreOffice
         
-        # PPT → PDF（使用--norestore参数，timeout从120秒降到60秒）
+        # PPT → PDF（加--norestore避免锁文件卡死，超时30秒）
         try:
-            subprocess.run([soffice, '--headless', '--norestore', '--convert-to', 'pdf', ppt_path, '--outdir', cache_dir], 
-                           capture_output=True, timeout=60)
+            subprocess.run([soffice, '--headless', '--norestore', '--convert-to', 'pdf', 
+                           ppt_path, '--outdir', cache_dir], 
+                           capture_output=True, timeout=30)
         except subprocess.TimeoutExpired:
-            print("PPT转PDF超时(60秒)，LibreOffice可能卡住了")
+            print("PPT转PDF超时（30秒）")
             return None
         except Exception as e:
             print(f"PPT转PDF失败: {e}")
@@ -1032,41 +1084,15 @@ class VideoWindow(QFrame):
                 images.append(img_path)
             doc.close()
             # 删除PDF节省空间
-            os.remove(pdf_path)
+            try:
+                os.remove(pdf_path)
+            except:
+                pass
         except Exception as e:
             print(f"PDF转图片失败: {e}")
             return None
         
         return images
-    
-    def _check_libreoffice_lock(self):
-        """检查LibreOffice锁文件，返回True表示正在运行"""
-        try:
-            if platform.system() == 'Windows':
-                lock_paths = [
-                    os.path.expanduser('~/.config/libreoffice'),
-                    os.path.join(os.environ.get('APPDATA', ''), 'LibreOffice'),
-                ]
-            else:
-                lock_paths = [
-                    os.path.expanduser('~/.config/libreoffice'),
-                    '/tmp/.libreoffice',
-                ]
-            
-            for lock_dir in lock_paths:
-                if os.path.exists(lock_dir):
-                    # 检查.lock文件
-                    lock_file = os.path.join(lock_dir, '.lock')
-                    if os.path.exists(lock_file):
-                        return True
-                    # 检查子目录中的锁文件
-                    for root, dirs, files in os.walk(lock_dir):
-                        for f in files:
-                            if f.endswith('.lock'):
-                                return True
-        except Exception as e:
-            print(f"检查锁文件失败: {e}")
-        return False
 
     def _show_ppt(self, file_path):
         """显示PPT文件"""
@@ -1083,6 +1109,14 @@ class VideoWindow(QFrame):
         if hasattr(self, '_ppt_timer'):
             self._ppt_timer.stop()
         
+        # 停止之前的转换线程
+        if hasattr(self, '_ppt_convert_thread') and self._ppt_convert_thread is not None:
+            try:
+                self._ppt_convert_thread.quit()
+                self._ppt_convert_thread.wait(1000)
+            except:
+                pass
+        
         # 显示加载提示
         self.image_label.setText("正在加载PPT...")
         self.image_label.setStyleSheet("""
@@ -1094,33 +1128,41 @@ class VideoWindow(QFrame):
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.show()
         self.video_frame.hide()
+        self._ppt_loading = True
         QApplication.processEvents()
         
-        # 转换PPT为图片
-        images = self._convert_ppt_to_images(file_path)
+        # 在后台线程中转换PPT
+        ppt_path_ref = file_path
         
-        if images is None:
-            # 没有LibreOffice，显示提示
-            self.image_label.setText("PPT预览需要安装LibreOffice\n请安装后重试")
-            self.image_label.setStyleSheet("""
-                background-color: black;
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-            """)
-            self.is_playing = False
-            return False
+        class PPTConvertThread(QThread):
+            finished = pyqtSignal(list)    # 成功，返回图片列表
+            error = pyqtSignal(str)        # 失败，返回错误信息
+            
+            def __init__(self, parent_window, ppt_path):
+                super().__init__()
+                self.parent_window = parent_window
+                self.ppt_path = ppt_path
+            
+            def run(self):
+                try:
+                    images = self.parent_window._convert_ppt_to_images(self.ppt_path)
+                    if images is not None and len(images) > 0:
+                        self.finished.emit(images)
+                    else:
+                        self.error.emit("PPT转换失败，请检查是否安装了Office或LibreOffice")
+                except Exception as e:
+                    self.error.emit(f"PPT转换出错: {str(e)}")
         
-        if not images:
-            self.image_label.setText("PPT转换失败\n请检查文件是否损坏")
-            self.image_label.setStyleSheet("""
-                background-color: black;
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-            """)
-            self.is_playing = False
-            return False
+        self._ppt_convert_thread = PPTConvertThread(self, ppt_path_ref)
+        self._ppt_convert_thread.finished.connect(self._on_ppt_converted)
+        self._ppt_convert_thread.error.connect(self._on_ppt_convert_error)
+        self._ppt_convert_thread.start()
+        return True
+    
+    def _on_ppt_converted(self, images):
+        """PPT转换完成回调"""
+        if not self._ppt_loading:
+            return
         
         # 保存PPT图片列表和当前页码
         self._ppt_images = images
@@ -1136,7 +1178,19 @@ class VideoWindow(QFrame):
         self._ppt_timer.start(5000)
         
         self.is_playing = True
-        return True
+        self._ppt_loading = False
+    
+    def _on_ppt_convert_error(self, error_msg):
+        """PPT转换失败回调"""
+        self.image_label.setText(f"PPT预览失败\n{error_msg}")
+        self.image_label.setStyleSheet("""
+            background-color: black;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        """)
+        self.is_playing = False
+        self._ppt_loading = False
 
     def _show_ppt_page(self, page_index):
         """显示PPT指定页"""
@@ -2768,11 +2822,11 @@ class MainWindow(QMainWindow):
             self.log(f"窗口{self.current_window_id}已打开")
     
     def on_video_window_clicked(self, window_id):
-        """视频窗口被点击 - 添加300ms防抖"""
+        """视频窗口被点击 - 加防抖保护"""
         import time
         now = time.time()
         if hasattr(self, '_last_click_time') and now - self._last_click_time < 0.3:
-            return  # 300ms防抖，避免频繁点击
+            return  # 300ms防抖
         self._last_click_time = now
         
         try:
