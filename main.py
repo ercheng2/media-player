@@ -1341,7 +1341,12 @@ class VideoWindow(QFrame):
         return result
         
     def next_media(self):
-        """下一个媒体"""
+        """下一个媒体 / PPT下一页"""
+        # 如果正在播放PPT，翻到下一页
+        if hasattr(self, '_ppt_images') and self._ppt_images and self.is_playing:
+            next_page = (self._ppt_current_page + 1) % len(self._ppt_images)
+            self._show_ppt_page(next_page)
+            return True
         if self.media_files:
             self.current_index = (self.current_index + 1) % len(self.media_files)
             result = self.play()
@@ -1353,7 +1358,12 @@ class VideoWindow(QFrame):
         return False
     
     def prev_media(self):
-        """上一个媒体"""
+        """上一个媒体 / PPT上一页"""
+        # 如果正在播放PPT，翻到上一页
+        if hasattr(self, '_ppt_images') and self._ppt_images and self.is_playing:
+            prev_page = (self._ppt_current_page - 1) % len(self._ppt_images)
+            self._show_ppt_page(prev_page)
+            return True
         if self.media_files:
             self.current_index = (self.current_index - 1) % len(self.media_files)
             result = self.play()
@@ -2386,6 +2396,27 @@ class MainWindow(QMainWindow):
         mute_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         btn_row2.addWidget(mute_cmd_label)
         control_layout.addLayout(btn_row2)
+        
+        # 第三行：PPT翻页按钮
+        btn_row3 = QHBoxLayout()
+        self.ppt_prev_btn = QPushButton("◀ 上一页")
+        self.ppt_prev_btn.setToolTip("PPT上一页 | UDP指令: prev")
+        self.ppt_prev_btn.clicked.connect(self.prev_media)
+        btn_row3.addWidget(self.ppt_prev_btn)
+        ppt_prev_cmd_label = QLabel("prev")
+        ppt_prev_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        ppt_prev_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_row3.addWidget(ppt_prev_cmd_label)
+        
+        self.ppt_next_btn = QPushButton("下一页 ▶")
+        self.ppt_next_btn.setToolTip("PPT下一页 | UDP指令: next")
+        self.ppt_next_btn.clicked.connect(self.next_media)
+        btn_row3.addWidget(self.ppt_next_btn)
+        ppt_next_cmd_label = QLabel("next")
+        ppt_next_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        ppt_next_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_row3.addWidget(ppt_next_cmd_label)
+        control_layout.addLayout(btn_row3)
         
         # UDP端口显示
         self.cmd_port_label = QLabel("UDP端口: 8888 | TCP端口: 8892")
