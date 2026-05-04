@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.56 - WindowActivate点击检测+日志调试
+版本：v2.57 - 修复点击窗口重播根因(loop_btn+media_combo信号)
 """
 
 import sys
@@ -3002,7 +3002,9 @@ class MainWindow(QMainWindow):
             mute_text = "🔇 取消静音" if window.is_muted else "🔊 静音"
             self.mute_btn.setText(mute_text)
             self.mute_btn2.setText(mute_text)
+            self.loop_btn.blockSignals(True)
             self.loop_btn.setChecked(window.loop_play)
+            self.loop_btn.blockSignals(False)
         
         # 更新媒体列表显示（显示当前窗口的媒体列表）
         self.update_media_list_display()
@@ -3403,6 +3405,7 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, '_updating_media_list', False):
             return
+        self.log(f"[DEBUG] _on_default_radio_changed: row={row}, wid={window_id}")
         # 获取该行对应的文件
         num_item = self.media_list.item(row, 0)
         if num_item:
@@ -3423,6 +3426,7 @@ class MainWindow(QMainWindow):
         """表格中播放模式下拉变化 (0=播放一遍, 1=循环播放)"""
         if getattr(self, '_updating_media_list', False):
             return
+        self.log(f"[DEBUG] _on_mode_changed: row={row}, wid={window_id}, idx={index}")
         num_item = self.media_list.item(row, 0)
         if num_item:
             idx = num_item.data(Qt.UserRole + 1)
@@ -3516,6 +3520,8 @@ class MainWindow(QMainWindow):
     
     def on_media_combo_changed(self, index):
         """媒体下拉框改变"""
+        if getattr(self, '_updating_media_list', False):
+            return
         if index >= 0 and self.current_window_id in self.video_windows:
             file_path = self.media_combo.itemData(index)
             if file_path:
