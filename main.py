@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.51 - 修复独立静音+_safe_apply_volume静音状态丢失
+版本：v2.52 - DirectSound独立音频+多窗口静音修复
 """
 
 import sys
@@ -744,7 +744,9 @@ class VideoWindow(QFrame):
                 if platform.system() == 'Linux':
                     self.vlc_instance = vlc.Instance('--no-video-title-show --vout xcb_x11 --avcodec-hw=none')
                 else:
-                    self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
+                    # Windows下必须用DirectSound音频模块，否则多VLC实例共享WASAPI音频会话，
+                    # 导致音量/静音无法独立控制（一个静音全静音）
+                    self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay --aout=directsound')
                 self.vlc_player = self.vlc_instance.media_player_new()
                 # 渲染窗口句柄延迟到showEvent中设置，避免窗口未show时winId无效
                 self._vlc_hwnd_set = False
