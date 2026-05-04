@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.47 - 循环播放从配置实时读取+VLC loop修复
+版本：v2.48 - 循环播放线程安全+重设media重播
 """
 
 import sys
@@ -512,6 +512,7 @@ class VideoWindow(QFrame):
     # 信号定义
     clicked = pyqtSignal(int)  # 点击信号，携带窗口编号
     window_closed = pyqtSignal(int)  # 窗口关闭信号，携带窗口编号
+    _vlc_end_reached_signal = pyqtSignal()  # VLC播放结束信号（线程安全传递）
     
     # 类变量：跟踪当前正在拖拽的窗口
     _dragging_window = None
@@ -752,6 +753,8 @@ class VideoWindow(QFrame):
                 # 设置VLC事件管理器，监听播放结束事件
                 self.vlc_events = self.vlc_player.event_manager()
                 self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
+                # 信号连接：VLC线程 → Qt主线程（线程安全）
+                self._vlc_end_reached_signal.connect(self._handle_vlc_end_reached)
             except Exception as e:
                 print(f"VLC初始化失败，回退到QMediaPlayer: {e}")
                 self.use_vlc = False
@@ -794,24 +797,29 @@ class VideoWindow(QFrame):
         self.resize(int(width), int(height))
     
     def _on_vlc_end_reached(self, event):
-        """VLC播放结束回调"""
-        # 从配置实时读取循环设置（不依赖self.loop_play，避免状态不同步）
+        """VLC播放结束回调（在VLC线程中执行，不能直接操作Qt对象）"""
+        # 通过信号传递到主线程处理，避免线程安全问题
+        print(f"[DEBUG] VLC EndReached in VLC thread - window{self.window_id}")
+        self._vlc_end_reached_signal.emit()
+    
+    def _handle_vlc_end_reached(self):
+        """VLC播放结束处理（在Qt主线程中执行）"""
+        # 从配置实时读取循环设置
         should_loop = self.loop_play
         if self.config_manager is not None and self.current_index >= 0:
             idx = self.current_index + 1
             media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
             should_loop = media_setting.get("loop", False)
-            # 同步到属性
             self.loop_play = should_loop
         
-        print(f"[DEBUG] VLC EndReached - window{self.window_id}, loop_play={self.loop_play}, should_loop={should_loop}")
+        print(f"[DEBUG] VLC EndReached in main thread - window{self.window_id}, loop_play={self.loop_play}, should_loop={should_loop}")
         
         if should_loop:
-            # 循环播放：直接回开头重播，不修改is_playing
+            # 循环播放：延迟重播
             QTimer.singleShot(300, self._loop_replay)
         else:
             self.is_playing = False
-            self._was_paused = False  # 播放结束，不是暂停
+            self._was_paused = False
     
     def _on_qt_state_changed(self, state):
         """Qt播放器状态改变回调"""
@@ -852,17 +860,27 @@ class VideoWindow(QFrame):
         self._loop_replaying = True
         try:
             if self.use_vlc:
-                # VLC播放结束后，直接play()会从头播放当前媒体
-                result = self.vlc_player.play()
-                print(f"[DEBUG] _loop_replay VLC play() returned: {result}")
-                # 如果play()返回-1（失败），用stop+play重试
-                if result == -1:
-                    print("[DEBUG] VLC play() failed, fallback to stop+play")
-                    self.vlc_player.stop()
-                    QTimer.singleShot(100, self.vlc_player.play)
+                # VLC播放结束后，直接play()可能无效
+                # 最可靠的方式：重新设置media并播放
+                if self.current_index >= 0 and self.current_index < len(self.media_files):
+                    file_path = self.media_files[self.current_index]
+                    if os.path.exists(file_path):
+                        self.vlc_player.stop()
+                        media = self.vlc_instance.media_new(file_path)
+                        media.add_option(':no-keep-aspect-ratio')
+                        self.vlc_player.set_media(media)
+                        self.vlc_player.play()
+                        print(f"[DEBUG] _loop_replay: re-set media and play for window{self.window_id}")
+                    else:
+                        print(f"[DEBUG] _loop_replay: file not found, fallback to replay()")
+                        self.replay()
+                else:
+                    print(f"[DEBUG] _loop_replay: no current media, fallback to replay()")
+                    self.replay()
                 # 延迟设置音量和拉伸
                 QTimer.singleShot(300, self._safe_apply_volume)
                 QTimer.singleShot(500, self._safe_set_vlc_stretch)
+                QTimer.singleShot(1000, self._safe_set_vlc_stretch)
             else:
                 # QMediaPlayer: setPosition回到开头
                 self.media_player.setPosition(0)
