@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.49 - VLC原生循环input-repeat+实时切换循环
+版本：v2.50 - 多窗口独立音量控制+V键修复+去除VLC stop阻塞
 """
 
 import sys
@@ -856,23 +856,18 @@ class VideoWindow(QFrame):
         return self.loop_play
     
     def _apply_loop_to_current_media(self):
-        """重新设置当前media，应用循环选项变更"""
+        """重新设置当前media，应用循环选项变更（不stop，直接替换media）"""
         try:
             if self.current_index >= 0 and self.current_index < len(self.media_files):
                 file_path = self.media_files[self.current_index]
                 if os.path.exists(file_path):
-                    # 记住当前播放位置
-                    current_time = self.vlc_player.get_time()
-                    self.vlc_player.stop()
+                    # 不调用stop()，直接替换media（VLC会自动切换，不阻塞主线程）
                     media = self.vlc_instance.media_new(file_path)
                     media.add_option(':no-keep-aspect-ratio')
                     if self.loop_play:
                         media.add_option(':input-repeat=-1')
                     self.vlc_player.set_media(media)
                     self.vlc_player.play()
-                    # 恢复播放位置（延迟设置，等播放开始后）
-                    if current_time > 0:
-                        QTimer.singleShot(500, lambda: self.vlc_player.set_time(current_time))
                     QTimer.singleShot(300, self._safe_apply_volume)
                     QTimer.singleShot(500, self._safe_set_vlc_stretch)
         except Exception as e:
@@ -889,17 +884,15 @@ class VideoWindow(QFrame):
         self._loop_replaying = True
         try:
             if self.use_vlc:
-                # 重新设置带循环选项的media
+                # 不调stop()，直接替换media（避免阻塞主线程）
                 if self.current_index >= 0 and self.current_index < len(self.media_files):
                     file_path = self.media_files[self.current_index]
                     if os.path.exists(file_path):
-                        self.vlc_player.stop()
                         media = self.vlc_instance.media_new(file_path)
                         media.add_option(':no-keep-aspect-ratio')
                         media.add_option(':input-repeat=-1')
                         self.vlc_player.set_media(media)
                         self.vlc_player.play()
-                        print(f"[DEBUG] _loop_replay fallback: re-set media with input-repeat for window{self.window_id}")
                     else:
                         self.replay()
                 else:
@@ -993,11 +986,7 @@ class VideoWindow(QFrame):
                 self.video_widget.lower()
             
             if self.use_vlc:
-                # 先停止当前播放
-                try:
-                    self.vlc_player.stop()
-                except:
-                    pass
+                # 不需要先stop，直接替换media（VLC会自动停止旧的并播放新的，避免stop阻塞主线程）
                 
                 # 确保VLC窗口句柄已设置
                 if hasattr(self, '_vlc_hwnd_set') and not self._vlc_hwnd_set:
@@ -1549,11 +1538,8 @@ class VideoWindow(QFrame):
         return self.is_locked
     
     def keyPressEvent(self, event):
-        """按键事件"""
-        if event.key() in [Qt.Key_V, Qt.Key_PageDown]:
-            self.toggle_lock()
-            event.accept()
-        elif event.key() == Qt.Key_Escape:
+        """按键事件 - V键/PageDown由全局快捷键处理，这里不重复处理"""
+        if event.key() == Qt.Key_Escape:
             if self.isFullScreen():
                 self.showNormal()
             event.accept()
@@ -2935,6 +2921,15 @@ class MainWindow(QMainWindow):
             self.y_spin.blockSignals(False)
             self.width_spin.blockSignals(False)
             self.height_spin.blockSignals(False)
+            
+            # 同步当前窗口的音量和静音状态到UI
+            window = self.video_windows[window_id]
+            self.volume_slider.blockSignals(True)
+            self.volume_slider.setValue(window.volume)
+            self.volume_label.setText(f"{window.volume}%")
+            self.volume_slider.blockSignals(False)
+            self.mute_btn.setText("🔇 取消静音" if window.is_muted else "🔊 静音")
+            self.loop_btn.setChecked(window.loop_play)
         
         # 更新媒体列表显示（显示当前窗口的媒体列表）
         self.update_media_list_display()
