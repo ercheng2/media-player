@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.46 - 修复循环播放不生效+播放/暂停继续/重播区分
+版本：v2.47 - 循环播放从配置实时读取+VLC loop修复
 """
 
 import sys
@@ -795,7 +795,18 @@ class VideoWindow(QFrame):
     
     def _on_vlc_end_reached(self, event):
         """VLC播放结束回调"""
-        if self.loop_play:
+        # 从配置实时读取循环设置（不依赖self.loop_play，避免状态不同步）
+        should_loop = self.loop_play
+        if self.config_manager is not None and self.current_index >= 0:
+            idx = self.current_index + 1
+            media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
+            should_loop = media_setting.get("loop", False)
+            # 同步到属性
+            self.loop_play = should_loop
+        
+        print(f"[DEBUG] VLC EndReached - window{self.window_id}, loop_play={self.loop_play}, should_loop={should_loop}")
+        
+        if should_loop:
             # 循环播放：直接回开头重播，不修改is_playing
             QTimer.singleShot(300, self._loop_replay)
         else:
@@ -805,11 +816,20 @@ class VideoWindow(QFrame):
     def _on_qt_state_changed(self, state):
         """Qt播放器状态改变回调"""
         from PyQt5.QtMultimedia import QMediaPlayer
-        if state == QMediaPlayer.StoppedState and self.loop_play:
-            QTimer.singleShot(100, self._loop_replay)
-        elif state == QMediaPlayer.StoppedState:
-            self.is_playing = False
-            self._was_paused = False  # 播放结束，不是暂停
+        if state == QMediaPlayer.StoppedState:
+            # 从配置实时读取循环设置
+            should_loop = self.loop_play
+            if self.config_manager is not None and self.current_index >= 0:
+                idx = self.current_index + 1
+                media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
+                should_loop = media_setting.get("loop", False)
+                self.loop_play = should_loop
+            
+            if should_loop:
+                QTimer.singleShot(100, self._loop_replay)
+            else:
+                self.is_playing = False
+                self._was_paused = False
     
     def _force_video_stretch(self):
         """Linux下强制视频铺满窗口 - 通过resize触发GStreamer重新布局"""
@@ -825,16 +845,22 @@ class VideoWindow(QFrame):
         return self.loop_play
     
     def _loop_replay(self):
-        """循环播放重播 - 用set_time/setPosition回到开头，避免stop+play状态冲突"""
+        """循环播放重播 - 播放结束后重新从头播放"""
         # 防重入：如果上次loop_replay还在执行中，跳过
         if getattr(self, '_loop_replaying', False):
             return
         self._loop_replaying = True
         try:
             if self.use_vlc:
-                # VLC: 直接设回起点播放，不stop
-                self.vlc_player.set_time(0)
-                self.vlc_player.play()
+                # VLC播放结束后，直接play()会从头播放当前媒体
+                result = self.vlc_player.play()
+                print(f"[DEBUG] _loop_replay VLC play() returned: {result}")
+                # 如果play()返回-1（失败），用stop+play重试
+                if result == -1:
+                    print("[DEBUG] VLC play() failed, fallback to stop+play")
+                    self.vlc_player.stop()
+                    QTimer.singleShot(100, self.vlc_player.play)
+                # 延迟设置音量和拉伸
                 QTimer.singleShot(300, self._safe_apply_volume)
                 QTimer.singleShot(500, self._safe_set_vlc_stretch)
             else:
@@ -849,7 +875,7 @@ class VideoWindow(QFrame):
                 pass
         finally:
             # 延迟解锁，防止VLC回调过快
-            QTimer.singleShot(500, self._unlock_loop_replay)
+            QTimer.singleShot(800, self._unlock_loop_replay)
     
     def _unlock_loop_replay(self):
         """解锁循环重播"""
