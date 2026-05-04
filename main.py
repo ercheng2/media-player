@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.55 - 统一鼠标事件+事件过滤器修复点击检测
+版本：v2.56 - WindowActivate点击检测+日志调试
 """
 
 import sys
@@ -565,9 +565,13 @@ class VideoWindow(QFrame):
             return
         
         try:
-            # 如果其他窗口正在拖拽，跳过
+            # 如果其他窗口正在拖拽，且那个窗口还可见，跳过
             if VideoWindow._dragging_window is not None and VideoWindow._dragging_window != self:
-                return
+                if VideoWindow._dragging_window.isVisible():
+                    return
+                else:
+                    # 拖拽窗口已不可见，强制清理
+                    VideoWindow._dragging_window = None
             
             # 获取鼠标左键状态
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000
@@ -613,11 +617,11 @@ class VideoWindow(QFrame):
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
             elif left_down and not self.is_locked and self._click_in_window:
-                # 鼠标按住移动中 - 判断是否真正开始拖拽（移动超过5像素才算拖拽）
+                # 鼠标按住移动中 - 判断是否真正开始拖拽（移动超过10像素才算拖拽）
                 if not getattr(self, '_has_dragged', False) and hasattr(self, '_mouse_press_pos') and self._mouse_press_pos:
                     dx = mx - self._mouse_press_pos[0]
                     dy = my - self._mouse_press_pos[1]
-                    if dx * dx + dy * dy > 25:  # 移动超过5像素
+                    if dx * dx + dy * dy > 100:  # 移动超过10像素
                         self._has_dragged = True
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
@@ -678,10 +682,10 @@ class VideoWindow(QFrame):
             super().mouseReleaseEvent(event)
     
     def mouseMoveEvent(self, event):
-        """鼠标移动 - 检测是否开始拖拽（移动超过5像素）"""
+        """鼠标移动 - 检测是否开始拖拽（移动超过10像素）"""
         if event.buttons() == Qt.LeftButton and self._drag_start_pos and not self.is_locked:
             delta = event.globalPos() - self._drag_start_pos
-            if delta.x() * delta.x() + delta.y() * delta.y() > 25:
+            if delta.x() * delta.x() + delta.y() * delta.y() > 100:
                 self._has_dragged = True
             # Linux拖拽移动
             if platform.system() != 'Windows' and self.is_dragging:
@@ -748,6 +752,17 @@ class VideoWindow(QFrame):
         # 启用鼠标追踪，确保能接收鼠标事件
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+    
+    def event(self, event):
+        """重写event方法 - 捕获窗口激活事件作为点击检测的补充"""
+        if event.type() == event.WindowActivate:
+            # 窗口被激活（用户点击了此窗口），发出clicked信号
+            import time
+            now = time.time()
+            if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.5:
+                self._last_emit_time = now
+                self.clicked.emit(self.window_id)
+        return super().event(event)
     
     def eventFilter(self, obj, event):
         """事件过滤器 - 将子控件（video_frame/image_label）的鼠标事件转发到VideoWindow"""
@@ -3086,7 +3101,7 @@ class MainWindow(QMainWindow):
             self.log(f"窗口{self.current_window_id}已打开")
     
     def on_video_window_clicked(self, window_id):
-        """视频窗口被点击 - 加防抖保护"""
+        """视频窗口被点击"""
         import time
         now = time.time()
         if hasattr(self, '_last_click_time') and now - self._last_click_time < 0.3:
@@ -3094,6 +3109,7 @@ class MainWindow(QMainWindow):
         self._last_click_time = now
         
         try:
+            self.log(f"点击了窗口{window_id}，切换控制")
             self.select_window(window_id)
             # 更新标签选中状态（blockSignals防止触发clicked再调select_window）
             btn = self.window_tabs.button(window_id)
@@ -3101,8 +3117,10 @@ class MainWindow(QMainWindow):
                 btn.blockSignals(True)
                 btn.setChecked(True)
                 btn.blockSignals(False)
+            else:
+                self.log(f"窗口{window_id}按钮未找到")
         except Exception as e:
-            print(f"窗口点击处理异常: {e}")
+            self.log(f"窗口点击处理异常: {e}")
     
     def on_video_window_closed(self, window_id):
         """视频窗口被关闭"""
