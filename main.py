@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.45 - 修复双击窗口卡死+循环播放防重入+点击释放触发
+版本：v2.46 - 修复循环播放不生效+播放/暂停继续/重播区分
 """
 
 import sys
@@ -527,6 +527,8 @@ class VideoWindow(QFrame):
         self.volume = 80
         self.is_muted = False
         self.loop_play = False  # 循环播放标志
+        self._was_paused = False  # 暂停标记，play()时可恢复
+        self.config_manager = None  # 配置管理器引用，由主窗口注入
         
         # 初始化UI
         self.init_ui()
@@ -798,6 +800,7 @@ class VideoWindow(QFrame):
             QTimer.singleShot(300, self._loop_replay)
         else:
             self.is_playing = False
+            self._was_paused = False  # 播放结束，不是暂停
     
     def _on_qt_state_changed(self, state):
         """Qt播放器状态改变回调"""
@@ -806,6 +809,7 @@ class VideoWindow(QFrame):
             QTimer.singleShot(100, self._loop_replay)
         elif state == QMediaPlayer.StoppedState:
             self.is_playing = False
+            self._was_paused = False  # 播放结束，不是暂停
     
     def _force_video_stretch(self):
         """Linux下强制视频铺满窗口 - 通过resize触发GStreamer重新布局"""
@@ -850,6 +854,13 @@ class VideoWindow(QFrame):
     def _unlock_loop_replay(self):
         """解锁循环重播"""
         self._loop_replaying = False
+    
+    def _sync_loop_from_config(self):
+        """从配置同步当前媒体的循环播放设置"""
+        if self.config_manager is not None and self.current_index >= 0:
+            idx = self.current_index + 1  # 配置中1-based
+            media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
+            self.loop_play = media_setting.get("loop", False)
         
     def set_media_files(self, files):
         """设置媒体文件列表"""
@@ -864,7 +875,18 @@ class VideoWindow(QFrame):
         return False
     
     def play(self, file_path=None):
-        """播放视频或显示图片"""
+        """播放视频或显示图片
+        
+        file_path=None时：
+        - 如果当前是暂停状态，恢复播放（继续）
+        - 如果当前没有播放，播放当前/第一个媒体（从头）
+        file_path指定时：从头播放指定媒体
+        """
+        # file_path=None 且当前是暂停状态 → 恢复播放（继续）
+        if file_path is None and getattr(self, '_was_paused', False):
+            self._resume()
+            return True
+        
         if file_path is None:
             if self.current_index >= 0 and self.current_index < len(self.media_files):
                 file_path = self.media_files[self.current_index]
@@ -874,6 +896,8 @@ class VideoWindow(QFrame):
             # 如果指定了文件，先找到索引
             if file_path in self.media_files:
                 self.current_index = self.media_files.index(file_path)
+                # 播放新媒体时，从配置同步循环设置
+                self._sync_loop_from_config()
         
         if not os.path.exists(file_path):
             print(f"文件不存在: {file_path}")
@@ -1318,11 +1342,27 @@ class VideoWindow(QFrame):
             else:
                 self.media_player.pause()
             self.is_playing = False
+            self._was_paused = True  # 标记为暂停状态，play()时可恢复
+        except:
+            pass
+    
+    def _resume(self):
+        """恢复播放（从暂停处继续）"""
+        try:
+            if self.use_vlc:
+                self.vlc_player.play()
+            else:
+                self.media_player.play()
+            self.is_playing = True
+            self._was_paused = False
+            if self.use_vlc:
+                QTimer.singleShot(300, self._safe_apply_volume)
         except:
             pass
     
     def stop(self):
         """停止"""
+        self._was_paused = False  # 停止后清除暂停标记
         # 隐藏图片标签，恢复视频显示
         if hasattr(self, 'image_label'):
             self.image_label.hide()
@@ -2894,6 +2934,7 @@ class MainWindow(QMainWindow):
                 window = VideoWindow(self.current_window_id)
                 window.clicked.connect(self.on_video_window_clicked)
                 window.window_closed.connect(self.on_video_window_closed)
+                window.config_manager = self.config_manager  # 注入配置管理器
                 self.video_windows[self.current_window_id] = window
                 
                 # 从配置加载该窗口保存的媒体文件
@@ -3540,6 +3581,7 @@ class MainWindow(QMainWindow):
                 window = VideoWindow(window_id)
                 window.clicked.connect(self.on_video_window_clicked)
                 window.window_closed.connect(self.on_video_window_closed)
+                window.config_manager = self.config_manager  # 注入配置管理器
                 self.video_windows[window_id] = window
                 
                 # 从配置加载该窗口保存的媒体文件
@@ -3745,6 +3787,7 @@ class MainWindow(QMainWindow):
                     window = VideoWindow(window_id)
                     window.clicked.connect(self.on_video_window_clicked)
                     window.window_closed.connect(self.on_video_window_closed)
+                    window.config_manager = self.config_manager  # 注入配置管理器
                     window.set_media_files(media_files)
                     window.set_volume(self.volume_slider.value())
                     window.set_position(pos.get("x", 100), pos.get("y", 100), 
