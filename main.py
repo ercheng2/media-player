@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.50 - 多窗口独立音量控制+V键修复+去除VLC stop阻塞
+版本：v2.51 - 修复独立静音+_safe_apply_volume静音状态丢失
 """
 
 import sys
@@ -1374,8 +1374,10 @@ class VideoWindow(QFrame):
     def _safe_apply_volume(self):
         """安全地应用音量设置"""
         try:
-            if hasattr(self, 'vlc_player') and self.use_vlc and not self.is_muted and self.is_playing:
-                self.vlc_player.audio_set_volume(self.volume)
+            if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
+                vol = 0 if self.is_muted else self.volume
+                result = self.vlc_player.audio_set_volume(vol)
+                print(f"[DEBUG] window{self.window_id} _safe_apply_volume: muted={self.is_muted}, vol={vol}, result={result}")
         except:
             pass
     
@@ -1496,7 +1498,8 @@ class VideoWindow(QFrame):
         self.volume = max(0, min(100, volume))
         if not self.is_muted:
             if self.use_vlc:
-                self.vlc_player.audio_set_volume(self.volume)
+                result = self.vlc_player.audio_set_volume(self.volume)
+                print(f"[DEBUG] window{self.window_id} set_volume={self.volume}, muted={self.is_muted}, result={result}")
             else:
                 self.media_player.setVolume(self.volume)
     
@@ -1504,7 +1507,9 @@ class VideoWindow(QFrame):
         """切换静音"""
         self.is_muted = not self.is_muted
         if self.use_vlc:
-            self.vlc_player.audio_set_volume(0 if self.is_muted else self.volume)
+            vol = 0 if self.is_muted else self.volume
+            result = self.vlc_player.audio_set_volume(vol)
+            print(f"[DEBUG] window{self.window_id} toggle_mute: muted={self.is_muted}, vol={vol}, result={result}")
         else:
             self.media_player.setVolume(0 if self.is_muted else self.volume)
         return self.is_muted
@@ -2928,7 +2933,9 @@ class MainWindow(QMainWindow):
             self.volume_slider.setValue(window.volume)
             self.volume_label.setText(f"{window.volume}%")
             self.volume_slider.blockSignals(False)
-            self.mute_btn.setText("🔇 取消静音" if window.is_muted else "🔊 静音")
+            mute_text = "🔇 取消静音" if window.is_muted else "🔊 静音"
+            self.mute_btn.setText(mute_text)
+            self.mute_btn2.setText(mute_text)
             self.loop_btn.setChecked(window.loop_play)
         
         # 更新媒体列表显示（显示当前窗口的媒体列表）
@@ -3447,6 +3454,7 @@ class MainWindow(QMainWindow):
         if self.current_window_id in self.video_windows:
             is_muted = self.video_windows[self.current_window_id].toggle_mute()
             self.mute_btn.setText("🔇 取消静音" if is_muted else "🔊 静音")
+            self.mute_btn2.setText("🔇 取消静音" if is_muted else "🔊 静音")
     
     def play_window(self, window_id):
         """播放指定窗口"""
