@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.53 - 点击视频窗口自动切换控制+拖拽/点击分离修复
+版本：v2.54 - 修复点击窗口视频重播+Tab高亮+信号保护
 """
 
 import sys
@@ -3059,10 +3059,12 @@ class MainWindow(QMainWindow):
         
         try:
             self.select_window(window_id)
-            # 更新标签选中状态
+            # 更新标签选中状态（blockSignals防止触发clicked再调select_window）
             btn = self.window_tabs.button(window_id)
             if btn:
+                btn.blockSignals(True)
                 btn.setChecked(True)
+                btn.blockSignals(False)
         except Exception as e:
             print(f"窗口点击处理异常: {e}")
     
@@ -3165,6 +3167,15 @@ class MainWindow(QMainWindow):
     
     def update_media_list_display(self):
         """更新媒体列表显示（表格形式，带编号、类型、控制指令、默认、模式）"""
+        # 标记正在更新，防止控件初始化时触发信号导致误操作（如重播视频）
+        self._updating_media_list = True
+        try:
+            self._update_media_list_display_impl()
+        finally:
+            self._updating_media_list = False
+    
+    def _update_media_list_display_impl(self):
+        """更新媒体列表显示的实际实现"""
         self.media_list.setRowCount(0)
         self.media_combo.clear()
         
