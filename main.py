@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.52 - DirectSound独立音频+多窗口静音修复
+版本：v2.53 - 点击视频窗口自动切换控制+拖拽/点击分离修复
 """
 
 import sys
@@ -580,36 +580,47 @@ class VideoWindow(QFrame):
                         geo.y() <= my < geo.y() + geo.height())
             
             if left_down and not self.last_left_down:
-                # 鼠标按下 - 记录按下位置，不emit clicked
+                # 鼠标按下 - 记录按下位置和初始鼠标坐标
                 if in_window:
-                    self._click_in_window = True  # 标记按下时在窗口内
+                    self._click_in_window = True
+                    self._mouse_press_pos = (mx, my)  # 记录按下时的鼠标位置
+                    self._has_dragged = False  # 还没拖动过
                     if not self.is_locked:
                         from PyQt5.QtCore import QPoint
                         self.drag_position = QPoint(mx - geo.x(), my - geo.y())
-                        self.is_dragging = True
-                        VideoWindow._dragging_window = self
                 else:
                     self._click_in_window = False
             elif not left_down and self.last_left_down:
-                # 鼠标释放 - 如果按下时在窗口内且没有拖动过，算作点击
-                if getattr(self, '_click_in_window', False) and not self.is_dragging:
+                # 鼠标释放 - 如果按下时在窗口内且没有真正拖动过，算作点击
+                if getattr(self, '_click_in_window', False) and not getattr(self, '_has_dragged', False):
                     # 防抖：300ms内不重复emit
                     import time
                     now = time.time()
                     if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.3:
                         self._last_emit_time = now
                         self.clicked.emit(self.window_id)
+                # 重置拖拽状态
                 self.is_dragging = False
                 self.drag_position = None
                 self._click_in_window = False
+                self._has_dragged = False
+                self._mouse_press_pos = None
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
-            elif left_down and self.is_dragging and not self.is_locked:
-                # 拖动中 - 标记拖动过，不再算点击
-                if self.drag_position:
+            elif left_down and not self.is_locked and self._click_in_window:
+                # 鼠标按住移动中 - 判断是否真正开始拖拽（移动超过5像素才算拖拽）
+                if not getattr(self, '_has_dragged', False) and hasattr(self, '_mouse_press_pos') and self._mouse_press_pos:
+                    dx = mx - self._mouse_press_pos[0]
+                    dy = my - self._mouse_press_pos[1]
+                    if dx * dx + dy * dy > 25:  # 移动超过5像素
+                        self._has_dragged = True
+                        self.is_dragging = True
+                        VideoWindow._dragging_window = self
+                
+                # 正在拖拽 - 移动窗口
+                if getattr(self, '_has_dragged', False) and self.drag_position:
                     from PyQt5.QtCore import QPoint
                     self.move(QPoint(mx - self.drag_position.x(), my - self.drag_position.y()))
-                    self._click_in_window = False  # 拖动了不算点击
             
             self.last_left_down = left_down
         except Exception as e:
@@ -617,6 +628,8 @@ class VideoWindow(QFrame):
             self.drag_position = None
             self.last_left_down = False
             self._click_in_window = False
+            self._has_dragged = False
+            self._mouse_press_pos = None
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
     
