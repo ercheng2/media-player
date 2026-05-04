@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.48 - 循环播放线程安全+重设media重播
+版本：v2.49 - VLC原生循环input-repeat+实时切换循环
 """
 
 import sys
@@ -850,50 +850,69 @@ class VideoWindow(QFrame):
     def toggle_loop(self):
         """切换循环播放"""
         self.loop_play = not self.loop_play
+        # 如果正在播放视频，需要重新设置media才能应用循环选项
+        if self.is_playing and self.use_vlc and self.current_index >= 0:
+            self._apply_loop_to_current_media()
         return self.loop_play
     
+    def _apply_loop_to_current_media(self):
+        """重新设置当前media，应用循环选项变更"""
+        try:
+            if self.current_index >= 0 and self.current_index < len(self.media_files):
+                file_path = self.media_files[self.current_index]
+                if os.path.exists(file_path):
+                    # 记住当前播放位置
+                    current_time = self.vlc_player.get_time()
+                    self.vlc_player.stop()
+                    media = self.vlc_instance.media_new(file_path)
+                    media.add_option(':no-keep-aspect-ratio')
+                    if self.loop_play:
+                        media.add_option(':input-repeat=-1')
+                    self.vlc_player.set_media(media)
+                    self.vlc_player.play()
+                    # 恢复播放位置（延迟设置，等播放开始后）
+                    if current_time > 0:
+                        QTimer.singleShot(500, lambda: self.vlc_player.set_time(current_time))
+                    QTimer.singleShot(300, self._safe_apply_volume)
+                    QTimer.singleShot(500, self._safe_set_vlc_stretch)
+        except Exception as e:
+            print(f"应用循环设置失败: {e}")
+    
     def _loop_replay(self):
-        """循环播放重播 - 播放结束后重新从头播放"""
-        # 防重入：如果上次loop_replay还在执行中，跳过
+        """循环播放重播 - Fallback方案（当VLC原生循环未生效时）
+        正常情况下VLC的 :input-repeat=-1 选项会自动循环，不需要这个方法。
+        只有在VLC原生循环失效时才会走到这里。
+        """
+        # 防重入
         if getattr(self, '_loop_replaying', False):
             return
         self._loop_replaying = True
         try:
             if self.use_vlc:
-                # VLC播放结束后，直接play()可能无效
-                # 最可靠的方式：重新设置media并播放
+                # 重新设置带循环选项的media
                 if self.current_index >= 0 and self.current_index < len(self.media_files):
                     file_path = self.media_files[self.current_index]
                     if os.path.exists(file_path):
                         self.vlc_player.stop()
                         media = self.vlc_instance.media_new(file_path)
                         media.add_option(':no-keep-aspect-ratio')
+                        media.add_option(':input-repeat=-1')
                         self.vlc_player.set_media(media)
                         self.vlc_player.play()
-                        print(f"[DEBUG] _loop_replay: re-set media and play for window{self.window_id}")
+                        print(f"[DEBUG] _loop_replay fallback: re-set media with input-repeat for window{self.window_id}")
                     else:
-                        print(f"[DEBUG] _loop_replay: file not found, fallback to replay()")
                         self.replay()
                 else:
-                    print(f"[DEBUG] _loop_replay: no current media, fallback to replay()")
                     self.replay()
-                # 延迟设置音量和拉伸
                 QTimer.singleShot(300, self._safe_apply_volume)
                 QTimer.singleShot(500, self._safe_set_vlc_stretch)
-                QTimer.singleShot(1000, self._safe_set_vlc_stretch)
             else:
-                # QMediaPlayer: setPosition回到开头
                 self.media_player.setPosition(0)
                 self.media_player.play()
         except Exception as e:
-            print(f"循环重播失败，fallback到replay: {e}")
-            try:
-                self.replay()
-            except:
-                pass
+            print(f"循环重播失败: {e}")
         finally:
-            # 延迟解锁，防止VLC回调过快
-            QTimer.singleShot(800, self._unlock_loop_replay)
+            QTimer.singleShot(1000, self._unlock_loop_replay)
     
     def _unlock_loop_replay(self):
         """解锁循环重播"""
@@ -934,6 +953,8 @@ class VideoWindow(QFrame):
         if file_path is None:
             if self.current_index >= 0 and self.current_index < len(self.media_files):
                 file_path = self.media_files[self.current_index]
+                # 从配置同步循环设置
+                self._sync_loop_from_config()
             else:
                 return False
         else:
@@ -992,6 +1013,9 @@ class VideoWindow(QFrame):
                 media = self.vlc_instance.media_new(file_path)
                 # 添加选项让视频拉伸填充窗口
                 media.add_option(':no-keep-aspect-ratio')
+                # 循环播放：用VLC原生选项，不再依赖EndReached回调手动重播
+                if self.loop_play:
+                    media.add_option(':input-repeat=-1')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
                 
@@ -3326,10 +3350,13 @@ class MainWindow(QMainWindow):
             # 如果是当前正在播放的媒体，同步循环状态
             if window_id in self.video_windows:
                 window = self.video_windows[window_id]
-                # 如果这个媒体正在播放，更新循环设置
+                # 如果这个媒体正在播放，更新循环设置并重新应用
                 if window.current_index == idx - 1:
                     window.loop_play = is_loop
                     self.loop_btn.setChecked(is_loop)
+                    # 重新设置media以应用循环选项变更
+                    if window.is_playing and window.use_vlc:
+                        window._apply_loop_to_current_media()
     
     def _on_minimize_to_tray_changed(self, state):
         """最小化到托盘设置变化"""
