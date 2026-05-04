@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.54 - 修复点击窗口视频重播+Tab高亮+信号保护
+版本：v2.55 - 统一鼠标事件+事件过滤器修复点击检测
 """
 
 import sys
@@ -544,10 +544,15 @@ class VideoWindow(QFrame):
         # Windows专用
         self.last_left_down = False
         self.click_pending = False  # 标记是否需要触发clicked信号
+        self._drag_start_pos = None  # 拖拽起始鼠标全局位置
+        self._has_dragged = False  # 是否发生了拖拽
         if platform.system() == 'Windows':
             self.drag_timer = QTimer(self)
             self.drag_timer.timeout.connect(self.check_drag)
             self.drag_timer.start(50)  # 20fps，够用且不堵主线程
+        
+        # 所有平台统一的鼠标事件处理（点击检测）
+        self.setMouseTracking(True)
         
     def check_drag(self):
         """定时器检查鼠标状态，实现窗口拖拽
@@ -633,48 +638,63 @@ class VideoWindow(QFrame):
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
     
-    # Linux下使用Qt原生鼠标事件处理窗口拖动
-    if platform.system() != 'Windows':
-        def mousePressEvent(self, event):
-            """Linux下鼠标按下事件"""
-            if event.button() == Qt.LeftButton and not self.is_locked:
+    # ===== 所有平台统一的鼠标点击检测（与拖拽逻辑分离）=====
+    def mousePressEvent(self, event):
+        """鼠标按下 - 记录按下位置，用于区分点击和拖拽"""
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.globalPos()
+            self._has_dragged = False
+            # Linux拖拽：记录拖拽起始位置
+            if platform.system() != 'Windows' and not self.is_locked:
                 self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
                 self.is_dragging = True
                 self.click_detected = False
                 VideoWindow._dragging_window = self
                 event.accept()
-            else:
-                super().mousePressEvent(event)
-        
-        def mouseMoveEvent(self, event):
-            """Linux下鼠标移动事件"""
-            if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
-                if self.drag_position:
-                    self.click_detected = True  # 有移动就不是点击
-                    self.move(event.globalPos() - self.drag_position)
-                    event.accept()
-            else:
-                super().mouseMoveEvent(event)
-        
-        def mouseReleaseEvent(self, event):
-            """Linux下鼠标释放事件"""
-            if event.button() == Qt.LeftButton:
+                return
+        super().mousePressEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """鼠标释放 - 如果没有拖拽过，算作点击，发出clicked信号"""
+        if event.button() == Qt.LeftButton:
+            # Linux拖拽清理
+            if platform.system() != 'Windows':
                 self.is_dragging = False
                 self.drag_position = None
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
-                # 如果没有拖动过，算作点击
-                if not self.click_detected:
+            
+            if not getattr(self, '_has_dragged', False):
+                # 没拖动过 = 纯点击
+                import time
+                now = time.time()
+                if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.3:
+                    self._last_emit_time = now
                     self.clicked.emit(self.window_id)
-                self.click_detected = False
+            self._drag_start_pos = None
+            self._has_dragged = False
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """鼠标移动 - 检测是否开始拖拽（移动超过5像素）"""
+        if event.buttons() == Qt.LeftButton and self._drag_start_pos and not self.is_locked:
+            delta = event.globalPos() - self._drag_start_pos
+            if delta.x() * delta.x() + delta.y() * delta.y() > 25:
+                self._has_dragged = True
+            # Linux拖拽移动
+            if platform.system() != 'Windows' and self.is_dragging:
+                self.click_detected = True
+                if self.drag_position:
+                    self.move(event.globalPos() - self.drag_position)
                 event.accept()
-            else:
-                super().mouseReleaseEvent(event)
-        
-        def wheelEvent(self, event):
-            """Linux下鼠标滚轮事件（用于音量控制等）"""
-            # 暂不处理，保持原有行为
-            super().wheelEvent(event)
+                return
+        super().mouseMoveEvent(event)
+    
+    def wheelEvent(self, event):
+        """鼠标滚轮事件"""
+        super().wheelEvent(event)
     
     def init_ui(self):
         """初始化UI"""
@@ -697,6 +717,8 @@ class VideoWindow(QFrame):
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
         self.video_frame.show()
+        # VLC控件会吞噬鼠标事件，需要事件过滤器将点击转发到VideoWindow
+        self.video_frame.installEventFilter(self)
         
         # 图片显示标签（覆盖在video_frame上方，用于显示图片文件）
         self.image_label = QLabel(self)
@@ -726,6 +748,20 @@ class VideoWindow(QFrame):
         # 启用鼠标追踪，确保能接收鼠标事件
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器 - 将子控件（video_frame/image_label）的鼠标事件转发到VideoWindow"""
+        if obj in (self.video_frame, getattr(self, 'image_label', None)):
+            if event.type() in (event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove):
+                # 将事件转发给VideoWindow自己处理
+                if event.type() == event.MouseButtonPress:
+                    self.mousePressEvent(event)
+                elif event.type() == event.MouseButtonRelease:
+                    self.mouseReleaseEvent(event)
+                elif event.type() == event.MouseMove:
+                    self.mouseMoveEvent(event)
+                return True  # 事件已处理
+        return super().eventFilter(obj, event)
     
     def resizeEvent(self, event):
         """窗口大小改变时更新视频容器和图片标签尺寸"""
