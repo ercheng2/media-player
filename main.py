@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.58 - 窗口锁定状态持久化保存/恢复
+版本：v2.59 - 窗口音量/静音状态持久化，所有设置保存检查
 """
 
 import sys
@@ -296,6 +296,30 @@ class ConfigManager:
         if str(window_id) not in self.config["windows"]:
             self.config["windows"][str(window_id)] = {}
         self.config["windows"][str(window_id)]["locked"] = locked
+    
+    def get_window_volume(self, window_id):
+        """获取窗口音量"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("volume", 80)
+    
+    def set_window_volume(self, window_id, volume):
+        """设置窗口音量"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["volume"] = volume
+    
+    def get_window_muted(self, window_id):
+        """获取窗口静音状态"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("muted", False)
+    
+    def set_window_muted(self, window_id, muted):
+        """设置窗口静音状态"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["muted"] = muted
     
     def get_minimize_to_tray(self):
         """获取是否启动时最小化到托盘"""
@@ -3553,6 +3577,8 @@ class MainWindow(QMainWindow):
             is_muted = self.video_windows[self.current_window_id].toggle_mute()
             self.mute_btn.setText("🔇 取消静音" if is_muted else "🔊 静音")
             self.mute_btn2.setText("🔇 取消静音" if is_muted else "🔊 静音")
+            # 保存配置（静音状态需要持久化）
+            self._schedule_save_config()
     
     def play_window(self, window_id):
         """播放指定窗口"""
@@ -3822,6 +3848,8 @@ class MainWindow(QMainWindow):
             if window.isVisible():
                 is_locked = window.toggle_lock()
                 self.log(f"窗口{self.current_window_id} {'锁定' if is_locked else '解锁'}")
+                # 保存配置（锁定状态需要持久化）
+                self._schedule_save_config()
     
     def log(self, message):
         """记录日志"""
@@ -3906,6 +3934,10 @@ class MainWindow(QMainWindow):
             self.config_manager.set_window_is_open(window_id, True)
             # 保存窗口锁定状态
             self.config_manager.set_window_locked(window_id, window.is_locked)
+            # 保存窗口音量
+            self.config_manager.set_window_volume(window_id, window.volume)
+            # 保存窗口静音状态
+            self.config_manager.set_window_muted(window_id, window.is_muted)
         
         # 保存最小化到托盘设置
         self.config_manager.set_minimize_to_tray(self.minimize_to_tray_check.isChecked())
@@ -3963,7 +3995,12 @@ class MainWindow(QMainWindow):
                     window.window_closed.connect(self.on_video_window_closed)
                     window.config_manager = self.config_manager  # 注入配置管理器
                     window.set_media_files(media_files)
-                    window.set_volume(self.volume_slider.value())
+                    # 恢复窗口音量（优先使用窗口自身保存的音量）
+                    saved_volume = self.config_manager.get_window_volume(window_id)
+                    window.set_volume(saved_volume)
+                    # 恢复窗口静音状态（is_muted会在play时通过_safe_apply_volume自动应用）
+                    if self.config_manager.get_window_muted(window_id):
+                        window.is_muted = True
                     window.set_position(pos.get("x", 100), pos.get("y", 100), 
                                         pos.get("width", 800), pos.get("height", 600))
                     window.show()
