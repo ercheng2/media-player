@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.57 - 修复点击窗口重播根因(loop_btn+media_combo信号)
+版本：v2.58 - 窗口锁定状态持久化保存/恢复
 """
 
 import sys
@@ -284,6 +284,18 @@ class ConfigManager:
         if str(window_id) not in self.config["windows"]:
             self.config["windows"][str(window_id)] = {}
         self.config["windows"][str(window_id)]["is_open"] = is_open
+    
+    def get_window_locked(self, window_id):
+        """获取窗口是否锁定"""
+        return self.config.get("windows", {}).get(str(window_id), {}).get("locked", False)
+    
+    def set_window_locked(self, window_id, locked):
+        """设置窗口是否锁定"""
+        if "windows" not in self.config:
+            self.config["windows"] = {}
+        if str(window_id) not in self.config["windows"]:
+            self.config["windows"][str(window_id)] = {}
+        self.config["windows"][str(window_id)]["locked"] = locked
     
     def get_minimize_to_tray(self):
         """获取是否启动时最小化到托盘"""
@@ -3892,6 +3904,8 @@ class MainWindow(QMainWindow):
             self.config_manager.set_window_position(window_id, pos.x(), pos.y(), size.width(), size.height())
             # 标记窗口为打开状态
             self.config_manager.set_window_is_open(window_id, True)
+            # 保存窗口锁定状态
+            self.config_manager.set_window_locked(window_id, window.is_locked)
         
         # 保存最小化到托盘设置
         self.config_manager.set_minimize_to_tray(self.minimize_to_tray_check.isChecked())
@@ -3967,6 +3981,10 @@ class MainWindow(QMainWindow):
                         window.play(default_media)
                     elif media_files:
                         window.play(media_files[0])
+                    
+                    # 恢复窗口锁定状态
+                    if self.config_manager.get_window_locked(window_id):
+                        window.lock()
                     
                     self.log(f"窗口{window_id}已自动恢复")
 
