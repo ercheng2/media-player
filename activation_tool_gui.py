@@ -1,6 +1,6 @@
 """
 坤展成-中控多窗口播放器 激活码生成工具（GUI版本）
-生成激活码并自动保存license.dat到D:\xiongdi
+生成激活码并自动保存license.dat到D:\\xiongdi
 """
 import sys
 import os
@@ -15,7 +15,7 @@ from PyQt5.QtGui import QFont
 
 SALT = "KZC-MEDIA-PLAYER-2026-ACTIVATION"
 SECRET_KEY = b"KZC_LICENSE_2026_XOR_KEY"
-SAVE_DIR = r"D:\xiongdi"
+SAVE_DIR = os.path.join("D:", os.sep, "xiongdi")
 
 def xor_crypt(data_bytes, key):
     """XOR加密/解密"""
@@ -106,7 +106,7 @@ class ActivationToolDialog(QDialog):
         layout.addLayout(act_layout)
         
         # 保存路径提示
-        save_hint = QLabel(f"license.dat 自动保存至：D:\\xiongdi\\license.dat")
+        save_hint = QLabel('license.dat 自动保存至：D:\\xiongdi\\license.dat')
         save_hint.setStyleSheet("color: #28a745; font-size: 11px; font-weight: bold;")
         save_hint.setAlignment(Qt.AlignCenter)
         layout.addWidget(save_hint)
@@ -139,10 +139,10 @@ class ActivationToolDialog(QDialog):
         try:
             filepath = generate_license_dat(reg_code, act_code, SAVE_DIR)
             save_record(reg_code, act_code, SAVE_DIR)
-            self.gen_btn.setText(f"已生成 → {filepath}")
+            self.gen_btn.setText("已生成 → " + filepath)
             self.gen_btn.setStyleSheet("background-color: #28a745; color: white; font-size: 13px; padding: 10px; border-radius: 4px;")
         except Exception as e:
-            self.gen_btn.setText(f"生成成功但保存失败: {e}")
+            self.gen_btn.setText("生成成功但保存失败: " + str(e))
             self.gen_btn.setStyleSheet("background-color: #dc3545; color: white; font-size: 12px; padding: 10px; border-radius: 4px;")
         
         QTimer.singleShot(3000, lambda: (self.gen_btn.setText("生成激活码"), self.gen_btn.setStyleSheet("background-color: #4488ff; color: white; font-size: 14px; padding: 10px; border-radius: 4px;")))
