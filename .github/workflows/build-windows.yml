@@ -43,9 +43,13 @@ jobs:
         }
         Get-ChildItem -Path $destVlc -Recurse | Select-Object FullName
     
-    - name: Build EXE
+    - name: Build Player EXE
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "media-player" --icon="Kunzhancheng.ico" --add-data "Kunzhancheng.ico;." --add-data "vlc;vlc" --hidden-import=vlc --hidden-import=serial --hidden-import=serial.tools.list_ports --hidden-import=fitz --hidden-import=pptx --hidden-import=win32com.client --hidden-import=pythoncom --hidden-import=comtypes.client main.py
+    
+    - name: Build Activation Tool EXE
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "activation-tool" --hidden-import=PyQt5 activation_tool_gui.py
     
     - name: Create Release
       uses: softprops/action-gh-release@v2
@@ -53,7 +57,7 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: "坤展成-中控多窗口播放器 ${{ github.ref_name }}"
         body: |
-          v2.43 - PPT用win32com优先+循环播放修复+点击防抖
+          v2.60 - 防篡改试用期+注册码激活码授权系统+激活工具
         files: dist/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
