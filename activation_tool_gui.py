@@ -3,8 +3,8 @@
 """
 import sys
 import hashlib
-from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QMessageBox, QClipboard)
+from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QPushButton, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
