@@ -2,13 +2,16 @@
 坤展成-中控多窗口播放器 激活码生成工具（GUI版本）
 """
 import sys
+import os
 import hashlib
+from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 SALT = "KZC-MEDIA-PLAYER-2026-ACTIVATION"
+SAVE_DIR = r"D:\xiongdi"
 
 def generate_activation_code(registration_code):
     """根据注册码生成激活码"""
@@ -16,16 +19,30 @@ def generate_activation_code(registration_code):
     code = hashlib.sha256(raw.encode('utf-8')).hexdigest().upper()[:16]
     return f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:16]}"
 
+def save_record(registration_code, activation_code):
+    """保存激活记录到D:\xiongdi"""
+    try:
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        filename = os.path.join(SAVE_DIR, "activation_records.txt")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(filename, "a", encoding="utf-8") as f:
+            f.write(f"{timestamp}  注册码: {registration_code}  激活码: {activation_code}
+")
+        return True
+    except Exception as e:
+        print(f"保存记录失败: {e}")
+        return False
+
 class ActivationToolDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("坤展成-中控播放器 激活码生成工具")
-        self.setFixedSize(450, 280)
+        self.setFixedSize(450, 320)
         self.init_ui()
     
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(12)
         
         # 标题
         title = QLabel("激活码生成工具")
@@ -62,6 +79,12 @@ class ActivationToolDialog(QDialog):
         act_layout.addWidget(self.copy_btn)
         layout.addLayout(act_layout)
         
+        # 保存路径提示
+        save_hint = QLabel(f"激活记录自动保存至：D:\xiongdi\activation_records.txt")
+        save_hint.setStyleSheet("color: #888; font-size: 11px;")
+        save_hint.setAlignment(Qt.AlignCenter)
+        layout.addWidget(save_hint)
+        
         # 生成按钮
         self.gen_btn = QPushButton("生成激活码")
         self.gen_btn.setStyleSheet("background-color: #4488ff; color: white; font-size: 14px; padding: 10px; border-radius: 4px;")
@@ -85,6 +108,15 @@ class ActivationToolDialog(QDialog):
         act_code = generate_activation_code(reg_code)
         self.act_edit.setText(act_code)
         self.copy_btn.setEnabled(True)
+        
+        # 保存记录到D盘
+        if save_record(reg_code, act_code):
+            self.gen_btn.setText("已生成并保存")
+            self.gen_btn.setStyleSheet("background-color: #28a745; color: white; font-size: 14px; padding: 10px; border-radius: 4px;")
+        else:
+            self.gen_btn.setText("已生成（保存失败）")
+            self.gen_btn.setStyleSheet("background-color: #dc3545; color: white; font-size: 14px; padding: 10px; border-radius: 4px;")
+        QTimer.singleShot(2000, lambda: (self.gen_btn.setText("生成激活码"), self.gen_btn.setStyleSheet("background-color: #4488ff; color: white; font-size: 14px; padding: 10px; border-radius: 4px;")))
     
     def copy_activation_code(self):
         """复制激活码到剪贴板"""
