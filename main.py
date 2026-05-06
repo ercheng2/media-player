@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.59 - 窗口音量/静音状态持久化，所有设置保存检查
+版本：v2.60 - 防篡改试用期+注册码激活码授权系统
 """
 
 import sys
@@ -384,29 +384,157 @@ class ConfigManager:
         self.config["windows"][str(window_id)]["default_media"] = media_path
 
 
+
 # ============== 机器码和授权管理 ==============
 
 class LicenseManager:
-    """授权管理类"""
+    """授权管理类 - 防篡改试用期 + 注册码/激活码"""
+    
+    _SECRET_KEY = b"KZC_LICENSE_2026_XOR_KEY"
+    _SALT = "KZC-MEDIA-PLAYER-2026-ACTIVATION"
+    _NTP_SERVERS = ["time.windows.com", "ntp.aliyun.com", "time.nist.gov"]
+    
+    @staticmethod
+    def _xor_crypt(data_bytes, key):
+        """XOR加密/解密"""
+        key_len = len(key)
+        return bytes([b ^ key[i % key_len] for i, b in enumerate(data_bytes)])
+    
+    @staticmethod
+    def _save_encrypted_data(data_dict):
+        """加密保存数据到license.dat"""
+        try:
+            json_str = json.dumps(data_dict, sort_keys=True)
+            encrypted = LicenseManager._xor_crypt(json_str.encode('utf-8'), LicenseManager._SECRET_KEY)
+            encoded = base64.b64encode(encrypted).decode('utf-8')
+            with open(LICENSE_FILE, 'w', encoding='utf-8') as f:
+                f.write(encoded)
+            return True
+        except Exception as e:
+            print(f"保存授权数据失败: {e}")
+            return False
+    
+    @staticmethod
+    def _load_encrypted_data():
+        """从license.dat解密读取数据"""
+        if not os.path.exists(LICENSE_FILE):
+            return None
+        try:
+            with open(LICENSE_FILE, 'r', encoding='utf-8') as f:
+                encoded = f.read().strip()
+            decoded = base64.b64decode(encoded)
+            decrypted = LicenseManager._xor_crypt(decoded, LicenseManager._SECRET_KEY)
+            return json.loads(decrypted.decode('utf-8'))
+        except:
+            return None
     
     @staticmethod
     def get_machine_code():
-        """获取机器码 - 基于硬件信息生成"""
+        """获取机器码（8位，格式XXXX-XXXX）- 作为注册码使用"""
         try:
-            # 获取CPU ID
             cpu_id = LicenseManager._get_cpu_id()
-            # 获取磁盘序列号
             disk_serial = LicenseManager._get_disk_serial()
-            # 获取MAC地址
             mac = LicenseManager._get_mac_address()
-            
-            # 组合并生成机器码
-            raw = f"{cpu_id}-{disk_serial}-{mac}-KUNZHANCHENG"
-            machine_code = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()
-            return machine_code
+            raw = f"{cpu_id}-{disk_serial}-{mac}-KZC-2026"
+            code = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()[:8]
+            return f"{code[:4]}-{code[4:]}"
         except Exception as e:
             print(f"获取机器码失败: {e}")
-            return "ERROR-MACHINE-CODE"
+            return "ERR0-0000"
+    
+    @staticmethod
+    def generate_activation_code(registration_code):
+        """根据注册码生成激活码（XXXX-XXXX-XXXX-XXXX）"""
+        raw = f"{registration_code}-{LicenseManager._SALT}"
+        code = hashlib.sha256(raw.encode('utf-8')).hexdigest().upper()[:16]
+        return f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:16]}"
+    
+    @staticmethod
+    def verify_activation_code(registration_code, activation_code):
+        """验证激活码是否匹配注册码"""
+        expected = LicenseManager.generate_activation_code(registration_code)
+        return activation_code.strip().upper() == expected.upper()
+    
+    @staticmethod
+    def get_network_time():
+        """从多个NTP服务器获取网络时间"""
+        for server in LicenseManager._NTP_SERVERS:
+            try:
+                import socket as _socket
+                sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                sock.settimeout(3)
+                ntp_packet = b'\x1b' + 47 * b'\0'
+                sock.sendto(ntp_packet, (server, 123))
+                response = sock.recv(48)
+                sock.close()
+                timestamp = struct.unpack('!I', response[40:44])[0]
+                timestamp -= 2208988800
+                return datetime.fromtimestamp(timestamp)
+            except:
+                continue
+        return None
+    
+    @staticmethod
+    def check_license_status():
+        """检查授权状态 - 返回 (is_licensed, status_text, remaining_days)"""
+        data = LicenseManager._load_encrypted_data()
+        
+        # 1. 检查是否已激活
+        if data and data.get("activated"):
+            reg = data.get("registration_code", "")
+            act = data.get("activation_code", "")
+            if LicenseManager.verify_activation_code(reg, act):
+                return True, "已授权", None
+        
+        # 2. 检查试用期
+        now_ntp = LicenseManager.get_network_time()
+        now_local = datetime.now()
+        now = now_ntp if now_ntp else now_local
+        
+        if data and "first_run" in data:
+            first_run = datetime.fromisoformat(data["first_run"])
+            last_run_str = data.get("last_run")
+            last_run = datetime.fromisoformat(last_run_str) if last_run_str else first_run
+            
+            # 回拨检测：当前时间比上次记录时间早超过2小时，认为篡改
+            if now < last_run - timedelta(hours=2):
+                return False, "试用期异常（检测到时间篡改）", 0
+            
+            remaining = TRIAL_DAYS - (now - first_run).days
+            
+            # 更新最后运行时间
+            data["last_run"] = now.isoformat()
+            data["ntp_available"] = now_ntp is not None
+            LicenseManager._save_encrypted_data(data)
+            
+            if remaining <= 0:
+                return False, "试用期已结束", 0
+            return False, "试用版", remaining
+        else:
+            # 首次运行，记录时间
+            first_time = now_ntp if now_ntp else now_local
+            data = {
+                "first_run": first_time.isoformat(),
+                "last_run": first_time.isoformat(),
+                "ntp_available": now_ntp is not None,
+                "activated": False
+            }
+            LicenseManager._save_encrypted_data(data)
+            return False, "试用版", TRIAL_DAYS
+    
+    @staticmethod
+    def activate(registration_code, activation_code):
+        """激活软件，返回 (success, message)"""
+        if LicenseManager.verify_activation_code(registration_code, activation_code):
+            data = LicenseManager._load_encrypted_data() or {}
+            data["activated"] = True
+            data["registration_code"] = registration_code
+            data["activation_code"] = activation_code
+            LicenseManager._save_encrypted_data(data)
+            return True, "激活成功"
+        return False, "激活码无效，请检查后重试"
+    
+    # ========= 硬件信息获取 =========
     
     @staticmethod
     def _get_cpu_id():
@@ -448,97 +576,6 @@ class LicenseManager:
             return ':'.join(f'{(mac >> i) & 0xff:02x}' for i in range(0, 48, 8))
         except:
             return "MAC-DEFAULT-ADDR"
-    
-    @staticmethod
-    def get_network_time():
-        """获取网络时间"""
-        try:
-            # 使用NTP服务器获取时间
-            import socket
-            NTP_SERVER = "time.windows.com"
-            NTP_PORT = 123
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(5)
-            
-            # NTP时间戳
-            ntp_packet = b'\x1b' + 47 * b'\0'
-            sock.sendto(ntp_packet, (NTP_SERVER, NTP_PORT))
-            response = sock.recv(48)
-            sock.close()
-            
-            # 解析时间戳
-            timestamp = struct.unpack('!I', response[40:44])[0]
-            timestamp -= 2208988800  # 转换为Unix时间戳
-            return datetime.fromtimestamp(timestamp)
-        except Exception as e:
-            print(f"获取网络时间失败: {e}")
-            return datetime.now()  # 失败时返回本地时间
-    
-    @staticmethod
-    def save_license(license_key):
-        """保存授权信息"""
-        try:
-            with open(LICENSE_FILE, 'w', encoding='utf-8') as f:
-                f.write(license_key)
-            return True
-        except Exception as e:
-            print(f"保存授权失败: {e}")
-            return False
-    
-    @staticmethod
-    def load_license():
-        """加载授权信息"""
-        try:
-            if os.path.exists(LICENSE_FILE):
-                with open(LICENSE_FILE, 'r', encoding='utf-8') as f:
-                    return f.read().strip()
-        except:
-            pass
-        return None
-    
-    @staticmethod
-    def verify_license(license_key):
-        """验证授权码"""
-        if not license_key:
-            return False, "未找到授权码"
-        
-        try:
-            # 授权码格式: BASE64(MD5(机器码 + 盐值))
-            expected = LicenseManager.generate_license_key(LicenseManager.get_machine_code())
-            if license_key == expected:
-                return True, "授权成功"
-            else:
-                return False, "授权码无效"
-        except Exception as e:
-            return False, f"验证失败: {e}"
-    
-    @staticmethod
-    def generate_license_key(machine_code):
-        """生成授权码"""
-        salt = "KUNZHANCHENG-2024-LICENSE"
-        raw = f"{machine_code}-{salt}"
-        key = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()
-        # 生成可读格式 XXXX-XXXX-XXXX-XXXX
-        return '-'.join([key[i:i+4] for i in range(0, 16, 4)])
-    
-    @staticmethod
-    def check_license_status():
-        """检查授权状态"""
-        license_key = LicenseManager.load_license()
-        
-        if license_key:
-            valid, msg = LicenseManager.verify_license(license_key)
-            if valid:
-                return True, "已授权", None
-        
-        # 获取网络时间作为试用期开始
-        start_time = LicenseManager.get_network_time()
-        expire_time = start_time + timedelta(days=TRIAL_DAYS)
-        remaining = (expire_time - start_time).days
-        
-        return False, "试用版", remaining
-
 
 # ============== 视频播放器窗口 ==============
 
@@ -1962,22 +1999,24 @@ class SerialManager(QThread):
         return []
 
 
+
 # ============== 激活对话框 ==============
 
 class ActivationDialog(QDialog):
-    """激活对话框"""
+    """激活对话框 - 注册码/激活码方式"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, expired=False):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.resize(500, 300)
+        self.resize(520, 380)
+        self.expired = expired
         self.init_ui()
         
     def init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout()
-        layout.setSpacing(20)
+        layout.setSpacing(15)
         
         # 标题
         title = QLabel("坤展成-中控多窗口播放器")
@@ -1985,25 +2024,40 @@ class ActivationDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        # 机器码
-        machine_code_label = QLabel("机器码：")
-        layout.addWidget(machine_code_label)
+        if self.expired:
+            warn = QLabel("⚠ 试用期已结束，请激活后继续使用")
+            warn.setStyleSheet("color: red; font-size: 13px; font-weight: bold;")
+            warn.setAlignment(Qt.AlignCenter)
+            layout.addWidget(warn)
         
-        self.machine_code_edit = QLineEdit()
-        self.machine_code_edit.setReadOnly(True)
-        self.machine_code_edit.setText(LicenseManager.get_machine_code())
-        layout.addWidget(self.machine_code_edit)
+        # 注册码（机器码）
+        reg_label = QLabel("注册码（请发送给经销商获取激活码）：")
+        layout.addWidget(reg_label)
         
-        # 授权码
-        license_label = QLabel("授权码：")
-        layout.addWidget(license_label)
+        reg_layout = QHBoxLayout()
+        self.reg_code_edit = QLineEdit()
+        self.reg_code_edit.setReadOnly(True)
+        self.reg_code_edit.setText(LicenseManager.get_machine_code())
+        self.reg_code_edit.setStyleSheet("background-color: #f0f0f0; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        reg_layout.addWidget(self.reg_code_edit)
         
-        self.license_edit = QLineEdit()
-        self.license_edit.setPlaceholderText("请输入授权码")
-        layout.addWidget(self.license_edit)
+        copy_btn = QPushButton("复制")
+        copy_btn.setFixedWidth(60)
+        copy_btn.clicked.connect(self.copy_reg_code)
+        reg_layout.addWidget(copy_btn)
+        layout.addLayout(reg_layout)
         
-        # 提示信息
-        hint = QLabel("请联系经销商获取授权码")
+        # 激活码输入
+        act_label = QLabel("激活码：")
+        layout.addWidget(act_label)
+        
+        self.act_code_edit = QLineEdit()
+        self.act_code_edit.setPlaceholderText("请输入激活码（格式：XXXX-XXXX-XXXX-XXXX）")
+        self.act_code_edit.setStyleSheet("font-size: 16px; letter-spacing: 2px;")
+        layout.addWidget(self.act_code_edit)
+        
+        # 提示
+        hint = QLabel("请联系经销商（18210234280）获取激活码")
         hint.setStyleSheet("color: gray;")
         hint.setAlignment(Qt.AlignCenter)
         layout.addWidget(hint)
@@ -2011,8 +2065,10 @@ class ActivationDialog(QDialog):
         # 按钮
         btn_layout = QHBoxLayout()
         self.ok_btn = QPushButton("激活")
+        self.ok_btn.setStyleSheet("background-color: #4488ff; color: white; font-size: 14px; padding: 8px 30px; border-radius: 4px;")
         self.ok_btn.clicked.connect(self.do_activation)
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton("退出" if self.expired else "取消")
+        cancel_btn.setStyleSheet("font-size: 14px; padding: 8px 30px;")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.ok_btn)
         btn_layout.addWidget(cancel_btn)
@@ -2020,21 +2076,27 @@ class ActivationDialog(QDialog):
         
         self.setLayout(layout)
         
+    def copy_reg_code(self):
+        """复制注册码到剪贴板"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.reg_code_edit.text())
+        self.reg_code_edit.setStyleSheet("background-color: #d4edda; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        QTimer.singleShot(1500, lambda: self.reg_code_edit.setStyleSheet("background-color: #f0f0f0; font-size: 16px; font-weight: bold; letter-spacing: 2px;"))
+    
     def do_activation(self):
         """执行激活"""
-        license_key = self.license_edit.text().strip()
-        if not license_key:
-            QMessageBox.warning(self, "提示", "请输入授权码")
+        reg_code = self.reg_code_edit.text().strip()
+        act_code = self.act_code_edit.text().strip()
+        if not act_code:
+            QMessageBox.warning(self, "提示", "请输入激活码")
             return
         
-        valid, msg = LicenseManager.verify_license(license_key)
-        if valid:
-            LicenseManager.save_license(license_key)
-            QMessageBox.information(self, "成功", "激活成功！")
+        success, msg = LicenseManager.activate(reg_code, act_code)
+        if success:
+            QMessageBox.information(self, "成功", "激活成功！感谢您的授权。")
             self.accept()
         else:
             QMessageBox.warning(self, "失败", msg)
-
 
 # ============== 关于对话框 ==============
 
@@ -2972,9 +3034,20 @@ class MainWindow(QMainWindow):
             self.trial_label.setStyleSheet("color: green; font-weight: bold;")
             self.activate_btn.setEnabled(False)
         else:
-            self.trial_label.setText(f"剩余{remaining}天试用期")
-            if remaining <= 0:
-                QMessageBox.warning(self, "试用期结束", "试用期已结束，请激活软件！")
+            if remaining is not None and remaining <= 0:
+                self.trial_label.setText(status)
+                self.trial_label.setStyleSheet("color: red; font-weight: bold;")
+                # 试用期结束，弹出激活对话框
+                dialog = ActivationDialog(self, expired=True)
+                if dialog.exec_() != QDialog.Accepted:
+                    # 用户拒绝激活，关闭主窗口
+                    self.close()
+                    return
+                self.check_license()
+            else:
+                self.trial_label.setText(f"剩余{remaining}天试用期")
+                if "异常" in status:
+                    self.trial_label.setStyleSheet("color: red; font-weight: bold;")
     
     def show_activation_dialog(self):
         """显示激活对话框"""
