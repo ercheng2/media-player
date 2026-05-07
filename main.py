@@ -1726,6 +1726,16 @@ class VideoWindow(QFrame):
         """获取窗口位置和大小"""
         geometry = self.geometry()
         return geometry.x(), geometry.y(), geometry.width(), geometry.height()
+    
+    def hide_window(self):
+        """隐藏窗口（视频继续播放）"""
+        self.hide()
+        self.is_visible = False
+    
+    def show_window(self):
+        """显示窗口"""
+        self.show()
+        self.is_visible = True
 
 
 # ============== 网络通信类 ==============
@@ -2702,6 +2712,27 @@ class MainWindow(QMainWindow):
         btn_row3.addWidget(ppt_next_cmd_label)
         control_layout.addLayout(btn_row3)
         
+        # 第四行：隐藏/显示窗口按钮
+        btn_row4 = QHBoxLayout()
+        self.hide_window_btn = QPushButton("👁 隐藏窗口")
+        self.hide_window_btn.setToolTip("UDP指令: hide")
+        self.hide_window_btn.clicked.connect(self.hide_current_window)
+        btn_row4.addWidget(self.hide_window_btn)
+        hide_cmd_label = QLabel("hide")
+        hide_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        hide_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_row4.addWidget(hide_cmd_label)
+        
+        self.show_window_btn = QPushButton("👁 显示窗口")
+        self.show_window_btn.setToolTip("UDP指令: show")
+        self.show_window_btn.clicked.connect(self.show_current_window)
+        btn_row4.addWidget(self.show_window_btn)
+        show_cmd_label = QLabel("show")
+        show_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
+        show_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_row4.addWidget(show_cmd_label)
+        control_layout.addLayout(btn_row4)
+        
         # UDP端口显示
         self.cmd_port_label = QLabel("UDP端口: 8888 | TCP端口: 8892")
         self.cmd_port_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
@@ -2712,6 +2743,12 @@ class MainWindow(QMainWindow):
         play_num_label.setStyleSheet("color: #888; font-size: 10px; padding: 2px;")
         play_num_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         control_layout.addWidget(play_num_label)
+        
+        # 隐藏/显示窗口指令提示
+        hide_show_label = QLabel("隐藏/显示: hide/show (隐藏后视频继续播放)")
+        hide_show_label.setStyleSheet("color: #888; font-size: 10px; padding: 2px;")
+        hide_show_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        control_layout.addWidget(hide_show_label)
         
         control_group.setLayout(control_layout)
         # 默认隐藏，窗口打开后才显示
@@ -3704,6 +3741,10 @@ class MainWindow(QMainWindow):
             window.toggle_fullscreen()
         elif cmd == "loop":
             window.toggle_loop()
+        elif cmd == "hide":
+            window.hide_window()
+        elif cmd == "show":
+            window.show_window()
         elif cmd.isdigit():
             # 按编号播放: 如 "3" 表示播放第3个媒体
             idx = int(cmd) - 1
@@ -3924,6 +3965,18 @@ class MainWindow(QMainWindow):
                 self.log(f"窗口{self.current_window_id} {'锁定' if is_locked else '解锁'}")
                 # 保存配置（锁定状态需要持久化）
                 self._schedule_save_config()
+    
+    def hide_current_window(self):
+        """隐藏当前视频窗口"""
+        if self.current_window_id in self.video_windows:
+            self.video_windows[self.current_window_id].hide_window()
+            self.log(f"窗口{self.current_window_id}已隐藏")
+    
+    def show_current_window(self):
+        """显示当前视频窗口"""
+        if self.current_window_id in self.video_windows:
+            self.video_windows[self.current_window_id].show_window()
+            self.log(f"窗口{self.current_window_id}已显示")
     
     def log(self, message):
         """记录日志"""
