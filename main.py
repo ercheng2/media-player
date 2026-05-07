@@ -4147,6 +4147,27 @@ class MainWindow(QMainWindow):
             # 关闭托盘图标
             self.tray_icon.hide()
             
+            # 清理Office进程，防止残留导致下次启动失败
+            import subprocess
+            import time
+            if platform.system() == 'Windows':
+                # 强制结束 PowerPoint 进程
+                for _ in range(3):
+                    try:
+                        subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], 
+                                       capture_output=True, timeout=3)
+                    except:
+                        pass
+                    time.sleep(0.3)
+                # 强制结束 LibreOffice 进程
+                for _ in range(3):
+                    try:
+                        subprocess.run(['taskkill', '/F', '/IM', 'soffice.exe'], 
+                                       capture_output=True, timeout=3)
+                    except:
+                        pass
+                    time.sleep(0.3)
+            
             event.accept()
         else:
             event.ignore()
@@ -4167,6 +4188,27 @@ class MainWindow(QMainWindow):
         
         # 关闭托盘图标
         self.tray_icon.hide()
+        
+        # 清理Office进程，防止残留导致下次启动失败
+        import subprocess
+        import time
+        if platform.system() == 'Windows':
+            # 强制结束 PowerPoint 进程
+            for _ in range(3):
+                try:
+                    subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], 
+                                   capture_output=True, timeout=3)
+                except:
+                    pass
+                time.sleep(0.3)
+            # 强制结束 LibreOffice 进程
+            for _ in range(3):
+                try:
+                    subprocess.run(['taskkill', '/F', '/IM', 'soffice.exe'], 
+                                   capture_output=True, timeout=3)
+                except:
+                    pass
+                time.sleep(0.3)
         
         QApplication.quit()
     
