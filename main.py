@@ -1510,21 +1510,27 @@ class VideoWindow(QFrame):
                     else:
                         self.error.emit("PPT转换失败，请检查是否安装了Office或LibreOffice")
                 except Exception as e:
-                    # 诊断：构建详细错误信息
-                    err_details = []
-                    err_details.append(type(e).__name__)
-                    if str(e).strip():
-                        err_details.append(str(e))
+                    # 构建详细错误信息
+                    err_parts = [type(e).__name__]
+                    s = str(e)
+                    if s.strip():
+                        err_parts.append(s)
                     if e.args:
-                        err_details.append("args:" + repr(e.args))
-                    # 检查COM异常属性
-                    for attr in ['hresult', 'text', 'strerror', 'reason']:
+                        err_parts.append(repr(e.args))
+                    # COM异常常见属性
+                    for attr in ['hresult', 'text', 'strerror', 'reason', '陪件']:
                         if hasattr(e, attr):
-                            val = getattr(e, attr)
-                            if val:
-                                err_details.append(f"{attr}={val}")
-                    err_msg = " | ".join(err_details)
+                            v = getattr(e, attr)
+                            if v and str(v).strip():
+                                err_parts.append(f"{attr}={v}")
+                    err_msg = " | ".join(err_parts)
+                    print(f"[PPT ERROR] {err_msg}")
                     self.error.emit("PPT转换出错: " + err_msg)
+                    # 同时通过父窗口记日志
+                    try:
+                        self.parent_window.log(f"PPT转换失败: {err_msg}")
+                    except:
+                        pass
         
         self._ppt_convert_thread = PPTConvertThread(self, ppt_path_ref)
         self._ppt_convert_thread.finished.connect(self._on_ppt_converted)
@@ -1555,7 +1561,12 @@ class VideoWindow(QFrame):
     
     def _on_ppt_convert_error(self, error_msg):
         """PPT转换失败回调"""
-        self.image_label.setText(f"PPT预览失败\n{error_msg}")
+        print(f"[PPT] _on_ppt_convert_error called, msg='{error_msg}'")
+        if not error_msg or not error_msg.strip():
+            # 异常消息为空，说明是内部静默失败，不显示空白
+            self.image_label.setText("PPT预览失败\n转换过程异常（无详细错误）")
+        else:
+            self.image_label.setText(f"PPT预览失败\n{error_msg}")
         self.image_label.setStyleSheet("""
             background-color: black;
             color: white;
