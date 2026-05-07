@@ -1214,22 +1214,46 @@ class VideoWindow(QFrame):
         print(f"[PPT] 开始转换: {ppt_path}")
         
         # 生成缓存目录（使用系统临时目录，Windows下为%TEMP%，Linux下为/tmp）
-        file_hash = hashlib.md5(open(ppt_path, 'rb').read()).hexdigest()[:8]
+        try:
+            with open(ppt_path, 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()[:8]
+        except MemoryError:
+            print("[PPT] MemoryError: 读取文件计算哈希时内存不足")
+            raise
+        except Exception as e:
+            print(f"[PPT] 读取文件失败: {e}")
+            return None
+        
         temp_dir = tempfile.gettempdir()
         cache_dir = os.path.join(temp_dir, f"ppt_slides_{file_hash}")
+        print(f"[PPT] 缓存目录: {cache_dir}")
         
-        # 如果已有缓存，直接返回
-        if os.path.exists(cache_dir) and os.listdir(cache_dir):
-            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.endswith('.png')])
-            if images:
-                return images
+        # 如果已有缓存，直接返回（检查是否有PNG文件）
+        if os.path.exists(cache_dir):
+            try:
+                cache_files = os.listdir(cache_dir)
+                if cache_files:
+                    images = sorted([os.path.join(cache_dir, f) for f in cache_files if f.endswith('.png')])
+                    if images:
+                        print(f"[PPT] 使用缓存: {len(images)}张图片")
+                        return images
+                    else:
+                        print(f"[PPT] 缓存目录存在但无PNG文件，清空重新转换")
+                        # 缓存目录存在但没有PNG，清理后重新转换
+                        import shutil
+                        try:
+                            shutil.rmtree(cache_dir)
+                        except:
+                            pass
+            except Exception as e:
+                print(f"[PPT] 检查缓存失败: {e}")
         
         os.makedirs(cache_dir, exist_ok=True)
         
         # Windows优先用PowerPoint COM自动化
         if platform.system() == 'Windows':
             images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
-            if images is not None:
+            if images is not None and len(images) > 0:
                 return images
         
         # 回退到LibreOffice方案
@@ -1430,23 +1454,40 @@ class VideoWindow(QFrame):
         
         pdf_path = os.path.join(cache_dir, pdf_files[0])
         
-        # PDF → 图片
+        # PDF → 图片（逐页处理，及时释放内存）
         try:
             doc = fitz.open(pdf_path)
             images = []
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                mat = fitz.Matrix(2, 2)  # 2x缩放，提高清晰度
-                pix = page.get_pixmap(matrix=mat)
-                img_path = os.path.join(cache_dir, f"slide_{page_num+1:03d}.png")
-                pix.save(img_path)
-                images.append(img_path)
+            total_pages = len(doc)
+            print(f"[PPT] PDF共{total_pages}页，开始转换...")
+            for page_num in range(total_pages):
+                try:
+                    page = doc[page_num]
+                    # 使用1.5倍缩放（降低内存占用），可根据需要调整
+                    mat = fitz.Matrix(1.5, 1.5)
+                    pix = page.get_pixmap(matrix=mat)
+                    img_path = os.path.join(cache_dir, f"slide_{page_num+1:03d}.png")
+                    pix.save(img_path)
+                    images.append(img_path)
+                    # 显式释放内存
+                    pix = None
+                    page = None
+                    print(f"[PPT] 已转换第{page_num+1}/{total_pages}页")
+                except MemoryError:
+                    print(f"[PPT] 第{page_num+1}页内存不足，停止转换")
+                    raise
+                except Exception as page_err:
+                    print(f"[PPT] 第{page_num+1}页转换失败: {page_err}")
+                    continue
             doc.close()
             # 删除PDF节省空间
             try:
                 os.remove(pdf_path)
             except:
                 pass
+        except MemoryError:
+            print("[PPT] MemoryError: PDF转图片时内存不足")
+            return None
         except Exception as e:
             print(f"PDF转图片失败: {e}")
             return None
