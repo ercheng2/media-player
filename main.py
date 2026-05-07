@@ -1354,69 +1354,106 @@ class VideoWindow(QFrame):
                 shutil.copy(image_paths[0], output_path)
     
     def _convert_ppt_with_wps(self, ppt_path, cache_dir):
-        """Windows下用WPS转换PPT为图片"""
+        """Windows下用WPS转换PPT为图片（使用PowerShell调用COM）"""
         import time
+        import subprocess
         
-        # 清理之前残留的WPS进程
-        for _ in range(3):
-            try:
-                subprocess.run(['taskkill', '/F', '/IM', 'et.exe'], capture_output=True, timeout=2)
-            except:
-                pass
-            time.sleep(0.2)
+        # WPS的ProgID列表
+        wps_progids = [
+            "WPP.Application",      # WPS演示
+            "WPS.Application",       # WPS
+            "PowerPoint.Application", # Microsoft Office
+        ]
         
-        # 尝试WPS的ET.Application（表格应用，但可以打开PPT）
-        try:
-            import win32com.client
-            import pythoncom
-            pythoncom.CoInitialize()
-            
-            try:
-                # WPS的ProgID
-                wps = win32com.client.Dispatch("WPS.Application")
-            except:
-                try:
-                    wps = win32com.client.Dispatch("WPP.Application")  # WPS演示
-                except:
-                    wps = None
-            
-            if wps is None:
-                pythoncom.CoUninitialize()
-                return None
-            
-            wps.Visible = False
-            
-            abs_path = os.path.abspath(ppt_path)
-            abs_cache = os.path.abspath(cache_dir)
-            
-            # 打开PPT
-            presentation = wps.Presentations.Open(abs_path, False, True, False)
-            
-            # 导出为PNG
-            presentation.Export(abs_cache, "PNG")
-            
-            # 关闭
-            presentation.Close()
-            wps.Quit()
-            
-            pythoncom.CoUninitialize()
-            
-            # 收集图片
-            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
-            if images:
-                print(f"[PPT] WPS成功，{len(images)}张图片")
-                return images
-                
-        except ImportError:
-            print("[PPT] win32com未安装")
-        except Exception as e:
-            print(f"[PPT] WPS方案失败: {e}")
-            try:
-                pythoncom.CoUninitialize()
-            except:
-                pass
+        print("[PPT] 尝试WPS/Office方案（PowerShell）...")
         
+        for progid in wps_progids:
+            print(f"[PPT] 尝试 ProgID: {progid}")
+            result = self._convert_ppt_with_powershell(progid, ppt_path, cache_dir)
+            if result:
+                return result
+        
+        print("[PPT] 所有PowerShell方案都失败")
         return None
+    
+    def _convert_ppt_with_powershell(self, progid, ppt_path, cache_dir):
+        """使用PowerShell调用COM转换PPT"""
+        import subprocess
+        
+        try:
+            # 构建PowerShell脚本
+            abs_path = os.path.abspath(ppt_path).replace('\\', '\\\\').replace("'", "''")
+            abs_cache = os.path.abspath(cache_dir).replace('\\', '\\\\').replace("'", "''")
+            
+            ps_script = f'''
+$ErrorActionPreference = 'Stop'
+try {{
+    $wps = New-Object -ComObject {progid}
+    $wps.Visible = $false
+    
+    Write-Host "[PPT] 正在打开PPT..."
+    $presentation = $wps.Presentations.Open('{abs_path}', $false, $true, $false)
+    
+    Write-Host "[PPT] 正在导出PNG..."
+    $presentation.Export('{abs_cache}', 'PNG')
+    
+    Write-Host "[PPT] 正在关闭..."
+    $presentation.Close()
+    $wps.Quit()
+    
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($wps) | Out-Null
+    Write-Host "[PPT] 成功"
+    exit 0
+}} catch {{
+    Write-Host "[PPT] 错误: $($_.Exception.Message)"
+    exit 1
+}}
+'''
+            
+            print(f"[PPT] 执行PowerShell: {progid}")
+            
+            # 写入临时脚本文件（ANSI编码避免PowerShell解析错误）
+            import tempfile
+            script_path = os.path.join(tempfile.gettempdir(), "ppt_convert.ps1")
+            
+            with open(script_path, 'w', encoding='ansi') as f:
+                f.write(ps_script)
+            
+            # 执行PowerShell脚本（同步执行，隐藏窗口）
+            result = subprocess.run(
+                ['powershell', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script_path],
+                capture_output=True, text=True, timeout=60
+            )
+            
+            # 输出日志
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(f"[PPT] PowerShell错误: {result.stderr}")
+            
+            # 清理脚本文件
+            try:
+                import os as os_module
+                os_module.remove(script_path)
+            except:
+                pass
+            
+            # 检查是否成功
+            if result.returncode == 0 and os.path.exists(cache_dir):
+                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+                if images:
+                    print(f"[PPT] PowerShell({progid})成功，{len(images)}张图片")
+                    return images
+            
+            print(f"[PPT] PowerShell({progid})未生成图片")
+            return None
+            
+        except subprocess.TimeoutExpired:
+            print(f"[PPT] PowerShell({progid})执行超时（60秒）")
+            return None
+        except Exception as e:
+            print(f"[PPT] PowerShell方案异常: {e}")
+            return None
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
