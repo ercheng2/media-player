@@ -608,6 +608,9 @@ class VideoWindow(QFrame):
         # 初始化UI
         self.init_ui()
         
+        # 控制面板始终置顶，保持在视频窗口之上
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        
         # 初始化播放器
         self.init_player()
         
@@ -2256,6 +2259,9 @@ class MainWindow(QMainWindow):
         
         # 初始化UI
         self.init_ui()
+        
+        # 控制面板始终置顶，保持在视频窗口之上
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # 连接信号
         self.connect_signals()
@@ -3935,8 +3941,8 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        # 短暂延迟后取消置顶，避免主窗口一直遮挡视频窗口
-        QTimer.singleShot(500, self._remove_stays_on_top)
+        # 控制面板始终置顶，保持在视频窗口之上
+        # 不再取消置顶
     
     def _remove_stays_on_top(self):
         """取消主窗口置顶（延迟执行，确保窗口已经显示到最前面）"""
