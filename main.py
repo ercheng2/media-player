@@ -3,7 +3,7 @@
 坤展成-中控多窗口播放器
 开发公司：北京万乘兄弟科技有限公司
 联系方式：18210234280
-版本：v2.60 - 防篡改试用期+注册码激活码授权系统
+版本：v2.42 - 修复PPT加载卡死+循环播放不生效+点击窗口报错
 """
 
 import sys
@@ -128,7 +128,7 @@ except ImportError:
 
 # 常量定义
 APP_NAME = "坤展成-中控多窗口播放器"
-APP_VERSION = "v2.36"
+APP_VERSION = "v2.42"
 COMPANY_NAME = "北京万乘兄弟科技有限公司"
 CONTACT_PHONE = "18210234280"
 
@@ -140,7 +140,7 @@ WINDOW_TCP_PORTS = [8892, 8893, 8894, 8895]
 
 # 授权相关
 TRIAL_DAYS = 30
-LICENSE_FILE = os.path.join("D:", os.sep, "xiongdi", "license.dat")
+LICENSE_FILE = "license.dat"
 MACHINE_CODE_FILE = "machine_code.dat"
 
 # 配置文件路径
@@ -285,42 +285,6 @@ class ConfigManager:
             self.config["windows"][str(window_id)] = {}
         self.config["windows"][str(window_id)]["is_open"] = is_open
     
-    def get_window_locked(self, window_id):
-        """获取窗口是否锁定"""
-        return self.config.get("windows", {}).get(str(window_id), {}).get("locked", False)
-    
-    def set_window_locked(self, window_id, locked):
-        """设置窗口是否锁定"""
-        if "windows" not in self.config:
-            self.config["windows"] = {}
-        if str(window_id) not in self.config["windows"]:
-            self.config["windows"][str(window_id)] = {}
-        self.config["windows"][str(window_id)]["locked"] = locked
-    
-    def get_window_volume(self, window_id):
-        """获取窗口音量"""
-        return self.config.get("windows", {}).get(str(window_id), {}).get("volume", 80)
-    
-    def set_window_volume(self, window_id, volume):
-        """设置窗口音量"""
-        if "windows" not in self.config:
-            self.config["windows"] = {}
-        if str(window_id) not in self.config["windows"]:
-            self.config["windows"][str(window_id)] = {}
-        self.config["windows"][str(window_id)]["volume"] = volume
-    
-    def get_window_muted(self, window_id):
-        """获取窗口静音状态"""
-        return self.config.get("windows", {}).get(str(window_id), {}).get("muted", False)
-    
-    def set_window_muted(self, window_id, muted):
-        """设置窗口静音状态"""
-        if "windows" not in self.config:
-            self.config["windows"] = {}
-        if str(window_id) not in self.config["windows"]:
-            self.config["windows"][str(window_id)] = {}
-        self.config["windows"][str(window_id)]["muted"] = muted
-    
     def get_minimize_to_tray(self):
         """获取是否启动时最小化到托盘"""
         return self.config.get("minimize_to_tray", False)
@@ -384,158 +348,29 @@ class ConfigManager:
         self.config["windows"][str(window_id)]["default_media"] = media_path
 
 
-
 # ============== 机器码和授权管理 ==============
 
 class LicenseManager:
-    """授权管理类 - 防篡改试用期 + 注册码/激活码"""
-    
-    _SECRET_KEY = b"KZC_LICENSE_2026_XOR_KEY"
-    _SALT = "KZC-MEDIA-PLAYER-2026-ACTIVATION"
-    _NTP_SERVERS = ["time.windows.com", "ntp.aliyun.com", "time.nist.gov"]
-    
-    @staticmethod
-    def _xor_crypt(data_bytes, key):
-        """XOR加密/解密"""
-        key_len = len(key)
-        return bytes([b ^ key[i % key_len] for i, b in enumerate(data_bytes)])
-    
-    @staticmethod
-    def _save_encrypted_data(data_dict):
-        """加密保存数据到license.dat"""
-        try:
-            os.makedirs(os.path.dirname(LICENSE_FILE), exist_ok=True)
-            json_str = json.dumps(data_dict, sort_keys=True)
-            encrypted = LicenseManager._xor_crypt(json_str.encode('utf-8'), LicenseManager._SECRET_KEY)
-            encoded = base64.b64encode(encrypted).decode('utf-8')
-            with open(LICENSE_FILE, 'w', encoding='utf-8') as f:
-                f.write(encoded)
-            return True
-        except Exception as e:
-            print(f"保存授权数据失败: {e}")
-            return False
-    
-    @staticmethod
-    def _load_encrypted_data():
-        """从license.dat解密读取数据"""
-        if not os.path.exists(LICENSE_FILE):
-            return None
-        try:
-            with open(LICENSE_FILE, 'r', encoding='utf-8') as f:
-                encoded = f.read().strip()
-            decoded = base64.b64decode(encoded)
-            decrypted = LicenseManager._xor_crypt(decoded, LicenseManager._SECRET_KEY)
-            return json.loads(decrypted.decode('utf-8'))
-        except:
-            return None
+    """授权管理类"""
     
     @staticmethod
     def get_machine_code():
-        """获取机器码（8位，格式XXXX-XXXX）- 作为注册码使用"""
+        """获取机器码 - 基于硬件信息生成"""
         try:
+            # 获取CPU ID
             cpu_id = LicenseManager._get_cpu_id()
+            # 获取磁盘序列号
             disk_serial = LicenseManager._get_disk_serial()
+            # 获取MAC地址
             mac = LicenseManager._get_mac_address()
-            raw = f"{cpu_id}-{disk_serial}-{mac}-KZC-2026"
-            code = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()[:8]
-            return f"{code[:4]}-{code[4:]}"
+            
+            # 组合并生成机器码
+            raw = f"{cpu_id}-{disk_serial}-{mac}-KUNZHANCHENG"
+            machine_code = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()
+            return machine_code
         except Exception as e:
             print(f"获取机器码失败: {e}")
-            return "ERR0-0000"
-    
-    @staticmethod
-    def generate_activation_code(registration_code):
-        """根据注册码生成激活码（XXXX-XXXX-XXXX-XXXX）"""
-        raw = f"{registration_code}-{LicenseManager._SALT}"
-        code = hashlib.sha256(raw.encode('utf-8')).hexdigest().upper()[:16]
-        return f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:16]}"
-    
-    @staticmethod
-    def verify_activation_code(registration_code, activation_code):
-        """验证激活码是否匹配注册码"""
-        expected = LicenseManager.generate_activation_code(registration_code)
-        return activation_code.strip().upper() == expected.upper()
-    
-    @staticmethod
-    def get_network_time():
-        """从多个NTP服务器获取网络时间"""
-        for server in LicenseManager._NTP_SERVERS:
-            try:
-                import socket as _socket
-                sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-                sock.settimeout(3)
-                ntp_packet = b'\x1b' + 47 * b'\0'
-                sock.sendto(ntp_packet, (server, 123))
-                response = sock.recv(48)
-                sock.close()
-                timestamp = struct.unpack('!I', response[40:44])[0]
-                timestamp -= 2208988800
-                return datetime.fromtimestamp(timestamp)
-            except:
-                continue
-        return None
-    
-    @staticmethod
-    def check_license_status():
-        """检查授权状态 - 返回 (is_licensed, status_text, remaining_days)"""
-        data = LicenseManager._load_encrypted_data()
-        
-        # 1. 检查是否已激活
-        if data and data.get("activated"):
-            reg = data.get("registration_code", "")
-            act = data.get("activation_code", "")
-            if LicenseManager.verify_activation_code(reg, act):
-                return True, "已授权", None
-        
-        # 2. 检查试用期
-        now_ntp = LicenseManager.get_network_time()
-        now_local = datetime.now()
-        now = now_ntp if now_ntp else now_local
-        
-        if data and "first_run" in data:
-            first_run = datetime.fromisoformat(data["first_run"])
-            last_run_str = data.get("last_run")
-            last_run = datetime.fromisoformat(last_run_str) if last_run_str else first_run
-            
-            # 回拨检测：当前时间比上次记录时间早超过2小时，认为篡改
-            if now < last_run - timedelta(hours=2):
-                return False, "试用期异常（检测到时间篡改）", 0
-            
-            remaining = TRIAL_DAYS - (now - first_run).days
-            
-            # 更新最后运行时间
-            data["last_run"] = now.isoformat()
-            data["ntp_available"] = now_ntp is not None
-            LicenseManager._save_encrypted_data(data)
-            
-            if remaining <= 0:
-                return False, "试用期已结束", 0
-            return False, "试用版", remaining
-        else:
-            # 首次运行，记录时间
-            first_time = now_ntp if now_ntp else now_local
-            data = {
-                "first_run": first_time.isoformat(),
-                "last_run": first_time.isoformat(),
-                "ntp_available": now_ntp is not None,
-                "activated": False
-            }
-            LicenseManager._save_encrypted_data(data)
-            return False, "试用版", TRIAL_DAYS
-    
-    @staticmethod
-    def activate(registration_code, activation_code):
-        """激活软件，返回 (success, message)"""
-        if LicenseManager.verify_activation_code(registration_code, activation_code):
-            data = LicenseManager._load_encrypted_data() or {}
-            data["activated"] = True
-            data["registration_code"] = registration_code
-            data["activation_code"] = activation_code
-            LicenseManager._save_encrypted_data(data)
-            return True, "激活成功"
-        return False, "激活码无效，请检查后重试"
-    
-    # ========= 硬件信息获取 =========
+            return "ERROR-MACHINE-CODE"
     
     @staticmethod
     def _get_cpu_id():
@@ -577,6 +412,97 @@ class LicenseManager:
             return ':'.join(f'{(mac >> i) & 0xff:02x}' for i in range(0, 48, 8))
         except:
             return "MAC-DEFAULT-ADDR"
+    
+    @staticmethod
+    def get_network_time():
+        """获取网络时间"""
+        try:
+            # 使用NTP服务器获取时间
+            import socket
+            NTP_SERVER = "time.windows.com"
+            NTP_PORT = 123
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(5)
+            
+            # NTP时间戳
+            ntp_packet = b'\x1b' + 47 * b'\0'
+            sock.sendto(ntp_packet, (NTP_SERVER, NTP_PORT))
+            response = sock.recv(48)
+            sock.close()
+            
+            # 解析时间戳
+            timestamp = struct.unpack('!I', response[40:44])[0]
+            timestamp -= 2208988800  # 转换为Unix时间戳
+            return datetime.fromtimestamp(timestamp)
+        except Exception as e:
+            print(f"获取网络时间失败: {e}")
+            return datetime.now()  # 失败时返回本地时间
+    
+    @staticmethod
+    def save_license(license_key):
+        """保存授权信息"""
+        try:
+            with open(LICENSE_FILE, 'w', encoding='utf-8') as f:
+                f.write(license_key)
+            return True
+        except Exception as e:
+            print(f"保存授权失败: {e}")
+            return False
+    
+    @staticmethod
+    def load_license():
+        """加载授权信息"""
+        try:
+            if os.path.exists(LICENSE_FILE):
+                with open(LICENSE_FILE, 'r', encoding='utf-8') as f:
+                    return f.read().strip()
+        except:
+            pass
+        return None
+    
+    @staticmethod
+    def verify_license(license_key):
+        """验证授权码"""
+        if not license_key:
+            return False, "未找到授权码"
+        
+        try:
+            # 授权码格式: BASE64(MD5(机器码 + 盐值))
+            expected = LicenseManager.generate_license_key(LicenseManager.get_machine_code())
+            if license_key == expected:
+                return True, "授权成功"
+            else:
+                return False, "授权码无效"
+        except Exception as e:
+            return False, f"验证失败: {e}"
+    
+    @staticmethod
+    def generate_license_key(machine_code):
+        """生成授权码"""
+        salt = "KUNZHANCHENG-2024-LICENSE"
+        raw = f"{machine_code}-{salt}"
+        key = hashlib.md5(raw.encode('utf-8')).hexdigest().upper()
+        # 生成可读格式 XXXX-XXXX-XXXX-XXXX
+        return '-'.join([key[i:i+4] for i in range(0, 16, 4)])
+    
+    @staticmethod
+    def check_license_status():
+        """检查授权状态"""
+        license_key = LicenseManager.load_license()
+        
+        if license_key:
+            valid, msg = LicenseManager.verify_license(license_key)
+            if valid:
+                return True, "已授权", None
+        
+        # 获取网络时间作为试用期开始
+        start_time = LicenseManager.get_network_time()
+        expire_time = start_time + timedelta(days=TRIAL_DAYS)
+        remaining = (expire_time - start_time).days
+        
+        return False, "试用版", remaining
+
 
 # ============== 视频播放器窗口 ==============
 
@@ -586,7 +512,6 @@ class VideoWindow(QFrame):
     # 信号定义
     clicked = pyqtSignal(int)  # 点击信号，携带窗口编号
     window_closed = pyqtSignal(int)  # 窗口关闭信号，携带窗口编号
-    _vlc_end_reached_signal = pyqtSignal()  # VLC播放结束信号（线程安全传递）
     
     # 类变量：跟踪当前正在拖拽的窗口
     _dragging_window = None
@@ -602,14 +527,9 @@ class VideoWindow(QFrame):
         self.volume = 80
         self.is_muted = False
         self.loop_play = False  # 循环播放标志
-        self._was_paused = False  # 暂停标记，play()时可恢复
-        self.config_manager = None  # 配置管理器引用，由主窗口注入
         
         # 初始化UI
         self.init_ui()
-        
-        # 控制面板始终置顶，保持在视频窗口之上
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # 初始化播放器
         self.init_player()
@@ -621,15 +541,10 @@ class VideoWindow(QFrame):
         # Windows专用
         self.last_left_down = False
         self.click_pending = False  # 标记是否需要触发clicked信号
-        self._drag_start_pos = None  # 拖拽起始鼠标全局位置
-        self._has_dragged = False  # 是否发生了拖拽
         if platform.system() == 'Windows':
             self.drag_timer = QTimer(self)
             self.drag_timer.timeout.connect(self.check_drag)
             self.drag_timer.start(50)  # 20fps，够用且不堵主线程
-        
-        # 所有平台统一的鼠标事件处理（点击检测）
-        self.setMouseTracking(True)
         
     def check_drag(self):
         """定时器检查鼠标状态，实现窗口拖拽
@@ -642,13 +557,9 @@ class VideoWindow(QFrame):
             return
         
         try:
-            # 如果其他窗口正在拖拽，且那个窗口还可见，跳过
+            # 如果其他窗口正在拖拽，跳过
             if VideoWindow._dragging_window is not None and VideoWindow._dragging_window != self:
-                if VideoWindow._dragging_window.isVisible():
-                    return
-                else:
-                    # 拖拽窗口已不可见，强制清理
-                    VideoWindow._dragging_window = None
+                return
             
             # 获取鼠标左键状态
             left_down = windll.user32.GetAsyncKeyState(1) & 0x8000
@@ -666,116 +577,80 @@ class VideoWindow(QFrame):
                         geo.y() <= my < geo.y() + geo.height())
             
             if left_down and not self.last_left_down:
-                # 鼠标按下 - 记录按下位置和初始鼠标坐标
+                # 鼠标按下
                 if in_window:
-                    self._click_in_window = True
-                    self._mouse_press_pos = (mx, my)  # 记录按下时的鼠标位置
-                    self._has_dragged = False  # 还没拖动过
+                    if not self.click_pending:
+                        self.click_pending = True
+                        self.clicked.emit(self.window_id)
                     if not self.is_locked:
                         from PyQt5.QtCore import QPoint
                         self.drag_position = QPoint(mx - geo.x(), my - geo.y())
-                else:
-                    self._click_in_window = False
-            elif not left_down and self.last_left_down:
-                # 鼠标释放 - 如果按下时在窗口内且没有真正拖动过，算作点击
-                if getattr(self, '_click_in_window', False) and not getattr(self, '_has_dragged', False):
-                    # 防抖：300ms内不重复emit
-                    import time
-                    now = time.time()
-                    if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.3:
-                        self._last_emit_time = now
-                        self.clicked.emit(self.window_id)
-                # 重置拖拽状态
-                self.is_dragging = False
-                self.drag_position = None
-                self._click_in_window = False
-                self._has_dragged = False
-                self._mouse_press_pos = None
-                if VideoWindow._dragging_window == self:
-                    VideoWindow._dragging_window = None
-            elif left_down and not self.is_locked and self._click_in_window:
-                # 鼠标按住移动中 - 判断是否真正开始拖拽（移动超过10像素才算拖拽）
-                if not getattr(self, '_has_dragged', False) and hasattr(self, '_mouse_press_pos') and self._mouse_press_pos:
-                    dx = mx - self._mouse_press_pos[0]
-                    dy = my - self._mouse_press_pos[1]
-                    if dx * dx + dy * dy > 100:  # 移动超过10像素
-                        self._has_dragged = True
                         self.is_dragging = True
                         VideoWindow._dragging_window = self
-                
-                # 正在拖拽 - 移动窗口
-                if getattr(self, '_has_dragged', False) and self.drag_position:
+            elif not left_down and self.last_left_down:
+                # 鼠标释放
+                self.is_dragging = False
+                self.drag_position = None
+                self.click_pending = False
+                if VideoWindow._dragging_window == self:
+                    VideoWindow._dragging_window = None
+            elif left_down and self.is_dragging and not self.is_locked:
+                # 拖动中
+                if self.drag_position:
                     from PyQt5.QtCore import QPoint
                     self.move(QPoint(mx - self.drag_position.x(), my - self.drag_position.y()))
             
             self.last_left_down = left_down
-        except Exception as e:
+        except:
             self.is_dragging = False
             self.drag_position = None
             self.last_left_down = False
-            self._click_in_window = False
-            self._has_dragged = False
-            self._mouse_press_pos = None
+            self.click_pending = False
             if VideoWindow._dragging_window == self:
                 VideoWindow._dragging_window = None
     
-    # ===== 所有平台统一的鼠标点击检测（与拖拽逻辑分离）=====
-    def mousePressEvent(self, event):
-        """鼠标按下 - 记录按下位置，用于区分点击和拖拽"""
-        if event.button() == Qt.LeftButton:
-            self._drag_start_pos = event.globalPos()
-            self._has_dragged = False
-            # Linux拖拽：记录拖拽起始位置
-            if platform.system() != 'Windows' and not self.is_locked:
+    # Linux下使用Qt原生鼠标事件处理窗口拖动
+    if platform.system() != 'Windows':
+        def mousePressEvent(self, event):
+            """Linux下鼠标按下事件"""
+            if event.button() == Qt.LeftButton and not self.is_locked:
                 self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
                 self.is_dragging = True
                 self.click_detected = False
                 VideoWindow._dragging_window = self
                 event.accept()
-                return
-        super().mousePressEvent(event)
-    
-    def mouseReleaseEvent(self, event):
-        """鼠标释放 - 如果没有拖拽过，算作点击，发出clicked信号"""
-        if event.button() == Qt.LeftButton:
-            # Linux拖拽清理
-            if platform.system() != 'Windows':
+            else:
+                super().mousePressEvent(event)
+        
+        def mouseMoveEvent(self, event):
+            """Linux下鼠标移动事件"""
+            if event.buttons() == Qt.LeftButton and self.is_dragging and not self.is_locked:
+                if self.drag_position:
+                    self.click_detected = True  # 有移动就不是点击
+                    self.move(event.globalPos() - self.drag_position)
+                    event.accept()
+            else:
+                super().mouseMoveEvent(event)
+        
+        def mouseReleaseEvent(self, event):
+            """Linux下鼠标释放事件"""
+            if event.button() == Qt.LeftButton:
                 self.is_dragging = False
                 self.drag_position = None
                 if VideoWindow._dragging_window == self:
                     VideoWindow._dragging_window = None
-            
-            if not getattr(self, '_has_dragged', False):
-                # 没拖动过 = 纯点击
-                import time
-                now = time.time()
-                if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.3:
-                    self._last_emit_time = now
+                # 如果没有拖动过，算作点击
+                if not self.click_detected:
                     self.clicked.emit(self.window_id)
-            self._drag_start_pos = None
-            self._has_dragged = False
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
-    
-    def mouseMoveEvent(self, event):
-        """鼠标移动 - 检测是否开始拖拽（移动超过10像素）"""
-        if event.buttons() == Qt.LeftButton and self._drag_start_pos and not self.is_locked:
-            delta = event.globalPos() - self._drag_start_pos
-            if delta.x() * delta.x() + delta.y() * delta.y() > 100:
-                self._has_dragged = True
-            # Linux拖拽移动
-            if platform.system() != 'Windows' and self.is_dragging:
-                self.click_detected = True
-                if self.drag_position:
-                    self.move(event.globalPos() - self.drag_position)
+                self.click_detected = False
                 event.accept()
-                return
-        super().mouseMoveEvent(event)
-    
-    def wheelEvent(self, event):
-        """鼠标滚轮事件"""
-        super().wheelEvent(event)
+            else:
+                super().mouseReleaseEvent(event)
+        
+        def wheelEvent(self, event):
+            """Linux下鼠标滚轮事件（用于音量控制等）"""
+            # 暂不处理，保持原有行为
+            super().wheelEvent(event)
     
     def init_ui(self):
         """初始化UI"""
@@ -798,8 +673,6 @@ class VideoWindow(QFrame):
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setGeometry(0, 0, 800, 600)
         self.video_frame.show()
-        # VLC控件会吞噬鼠标事件，需要事件过滤器将点击转发到VideoWindow
-        self.video_frame.installEventFilter(self)
         
         # 图片显示标签（覆盖在video_frame上方，用于显示图片文件）
         self.image_label = QLabel(self)
@@ -829,31 +702,6 @@ class VideoWindow(QFrame):
         # 启用鼠标追踪，确保能接收鼠标事件
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
-    
-    def event(self, event):
-        """重写event方法 - 捕获窗口激活事件作为点击检测的补充"""
-        if event.type() == event.WindowActivate:
-            # 窗口被激活（用户点击了此窗口），发出clicked信号
-            import time
-            now = time.time()
-            if not hasattr(self, '_last_emit_time') or now - self._last_emit_time > 0.5:
-                self._last_emit_time = now
-                self.clicked.emit(self.window_id)
-        return super().event(event)
-    
-    def eventFilter(self, obj, event):
-        """事件过滤器 - 将子控件（video_frame/image_label）的鼠标事件转发到VideoWindow"""
-        if obj in (self.video_frame, getattr(self, 'image_label', None)):
-            if event.type() in (event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove):
-                # 将事件转发给VideoWindow自己处理
-                if event.type() == event.MouseButtonPress:
-                    self.mousePressEvent(event)
-                elif event.type() == event.MouseButtonRelease:
-                    self.mouseReleaseEvent(event)
-                elif event.type() == event.MouseMove:
-                    self.mouseMoveEvent(event)
-                return True  # 事件已处理
-        return super().eventFilter(obj, event)
     
     def resizeEvent(self, event):
         """窗口大小改变时更新视频容器和图片标签尺寸"""
@@ -885,9 +733,7 @@ class VideoWindow(QFrame):
                 if platform.system() == 'Linux':
                     self.vlc_instance = vlc.Instance('--no-video-title-show --vout xcb_x11 --avcodec-hw=none')
                 else:
-                    # Windows下必须用DirectSound音频模块，否则多VLC实例共享WASAPI音频会话，
-                    # 导致音量/静音无法独立控制（一个静音全静音）
-                    self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay --aout=directsound')
+                    self.vlc_instance = vlc.Instance('--no-video-title-show --no-overlay')
                 self.vlc_player = self.vlc_instance.media_player_new()
                 # 渲染窗口句柄延迟到showEvent中设置，避免窗口未show时winId无效
                 self._vlc_hwnd_set = False
@@ -896,8 +742,6 @@ class VideoWindow(QFrame):
                 # 设置VLC事件管理器，监听播放结束事件
                 self.vlc_events = self.vlc_player.event_manager()
                 self.vlc_events.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end_reached)
-                # 信号连接：VLC线程 → Qt主线程（线程安全）
-                self._vlc_end_reached_signal.connect(self._handle_vlc_end_reached)
             except Exception as e:
                 print(f"VLC初始化失败，回退到QMediaPlayer: {e}")
                 self.use_vlc = False
@@ -940,47 +784,34 @@ class VideoWindow(QFrame):
         self.resize(int(width), int(height))
     
     def _on_vlc_end_reached(self, event):
-        """VLC播放结束回调（在VLC线程中执行，不能直接操作Qt对象）"""
-        # 通过信号传递到主线程处理，避免线程安全问题
-        print(f"[DEBUG] VLC EndReached in VLC thread - window{self.window_id}")
-        self._vlc_end_reached_signal.emit()
-    
-    def _handle_vlc_end_reached(self):
-        """VLC播放结束处理（在Qt主线程中执行）"""
-        # 从配置实时读取循环设置
-        should_loop = self.loop_play
-        if self.config_manager is not None and self.current_index >= 0:
-            idx = self.current_index + 1
-            media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
-            should_loop = media_setting.get("loop", False)
-            self.loop_play = should_loop
-        
-        print(f"[DEBUG] VLC EndReached in main thread - window{self.window_id}, loop_play={self.loop_play}, should_loop={should_loop}")
-        
-        if should_loop:
-            # 循环播放：延迟重播
+        """VLC播放结束回调 - 修复循环播放"""
+        if self.loop_play:
+            # 不修改is_playing，避免状态冲突
+            # 使用QTimer回到主线程重新播放，延迟300ms确保VLC状态稳定
             QTimer.singleShot(300, self._loop_replay)
-        else:
-            self.is_playing = False
-            self._was_paused = False
+    
+    def _loop_replay(self):
+        """循环播放重播 - 使用set_time(0)代替stop()+play()"""
+        if self.loop_play:
+            try:
+                if self.use_vlc:
+                    self.vlc_player.set_time(0)  # 回到开头
+                    self.vlc_player.play()
+                    QTimer.singleShot(300, self._safe_apply_volume)
+                    QTimer.singleShot(500, self._safe_set_vlc_stretch)
+                else:
+                    self.media_player.setPosition(0)
+                    self.media_player.play()
+            except Exception as e:
+                # fallback: stop + play
+                print(f"循环播放重播失败，回退到stop+play: {e}")
+                self.replay()
     
     def _on_qt_state_changed(self, state):
-        """Qt播放器状态改变回调"""
+        """Qt播放器状态改变回调 - 修复循环播放"""
         from PyQt5.QtMultimedia import QMediaPlayer
-        if state == QMediaPlayer.StoppedState:
-            # 从配置实时读取循环设置
-            should_loop = self.loop_play
-            if self.config_manager is not None and self.current_index >= 0:
-                idx = self.current_index + 1
-                media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
-                should_loop = media_setting.get("loop", False)
-                self.loop_play = should_loop
-            
-            if should_loop:
-                QTimer.singleShot(100, self._loop_replay)
-            else:
-                self.is_playing = False
-                self._was_paused = False
+        if state == QMediaPlayer.StoppedState and self.loop_play:
+            QTimer.singleShot(200, self._loop_replay)
     
     def _force_video_stretch(self):
         """Linux下强制视频铺满窗口 - 通过resize触发GStreamer重新布局"""
@@ -993,73 +824,7 @@ class VideoWindow(QFrame):
     def toggle_loop(self):
         """切换循环播放"""
         self.loop_play = not self.loop_play
-        # 如果正在播放视频，需要重新设置media才能应用循环选项
-        if self.is_playing and self.use_vlc and self.current_index >= 0:
-            self._apply_loop_to_current_media()
         return self.loop_play
-    
-    def _apply_loop_to_current_media(self):
-        """重新设置当前media，应用循环选项变更（不stop，直接替换media）"""
-        try:
-            if self.current_index >= 0 and self.current_index < len(self.media_files):
-                file_path = self.media_files[self.current_index]
-                if os.path.exists(file_path):
-                    # 不调用stop()，直接替换media（VLC会自动切换，不阻塞主线程）
-                    media = self.vlc_instance.media_new(file_path)
-                    media.add_option(':no-keep-aspect-ratio')
-                    if self.loop_play:
-                        media.add_option(':input-repeat=-1')
-                    self.vlc_player.set_media(media)
-                    self.vlc_player.play()
-                    QTimer.singleShot(300, self._safe_apply_volume)
-                    QTimer.singleShot(500, self._safe_set_vlc_stretch)
-        except Exception as e:
-            print(f"应用循环设置失败: {e}")
-    
-    def _loop_replay(self):
-        """循环播放重播 - Fallback方案（当VLC原生循环未生效时）
-        正常情况下VLC的 :input-repeat=-1 选项会自动循环，不需要这个方法。
-        只有在VLC原生循环失效时才会走到这里。
-        """
-        # 防重入
-        if getattr(self, '_loop_replaying', False):
-            return
-        self._loop_replaying = True
-        try:
-            if self.use_vlc:
-                # 不调stop()，直接替换media（避免阻塞主线程）
-                if self.current_index >= 0 and self.current_index < len(self.media_files):
-                    file_path = self.media_files[self.current_index]
-                    if os.path.exists(file_path):
-                        media = self.vlc_instance.media_new(file_path)
-                        media.add_option(':no-keep-aspect-ratio')
-                        media.add_option(':input-repeat=-1')
-                        self.vlc_player.set_media(media)
-                        self.vlc_player.play()
-                    else:
-                        self.replay()
-                else:
-                    self.replay()
-                QTimer.singleShot(300, self._safe_apply_volume)
-                QTimer.singleShot(500, self._safe_set_vlc_stretch)
-            else:
-                self.media_player.setPosition(0)
-                self.media_player.play()
-        except Exception as e:
-            print(f"循环重播失败: {e}")
-        finally:
-            QTimer.singleShot(1000, self._unlock_loop_replay)
-    
-    def _unlock_loop_replay(self):
-        """解锁循环重播"""
-        self._loop_replaying = False
-    
-    def _sync_loop_from_config(self):
-        """从配置同步当前媒体的循环播放设置"""
-        if self.config_manager is not None and self.current_index >= 0:
-            idx = self.current_index + 1  # 配置中1-based
-            media_setting = self.config_manager.get_media_item_setting(self.window_id, idx)
-            self.loop_play = media_setting.get("loop", False)
         
     def set_media_files(self, files):
         """设置媒体文件列表"""
@@ -1074,31 +839,16 @@ class VideoWindow(QFrame):
         return False
     
     def play(self, file_path=None):
-        """播放视频或显示图片
-        
-        file_path=None时：
-        - 如果当前是暂停状态，恢复播放（继续）
-        - 如果当前没有播放，播放当前/第一个媒体（从头）
-        file_path指定时：从头播放指定媒体
-        """
-        # file_path=None 且当前是暂停状态 → 恢复播放（继续）
-        if file_path is None and getattr(self, '_was_paused', False):
-            self._resume()
-            return True
-        
+        """播放视频或显示图片"""
         if file_path is None:
             if self.current_index >= 0 and self.current_index < len(self.media_files):
                 file_path = self.media_files[self.current_index]
-                # 从配置同步循环设置
-                self._sync_loop_from_config()
             else:
                 return False
         else:
             # 如果指定了文件，先找到索引
             if file_path in self.media_files:
                 self.current_index = self.media_files.index(file_path)
-                # 播放新媒体时，从配置同步循环设置
-                self._sync_loop_from_config()
         
         if not os.path.exists(file_path):
             print(f"文件不存在: {file_path}")
@@ -1129,7 +879,11 @@ class VideoWindow(QFrame):
                 self.video_widget.lower()
             
             if self.use_vlc:
-                # 不需要先stop，直接替换media（VLC会自动停止旧的并播放新的，避免stop阻塞主线程）
+                # 先停止当前播放
+                try:
+                    self.vlc_player.stop()
+                except:
+                    pass
                 
                 # 确保VLC窗口句柄已设置
                 if hasattr(self, '_vlc_hwnd_set') and not self._vlc_hwnd_set:
@@ -1145,9 +899,6 @@ class VideoWindow(QFrame):
                 media = self.vlc_instance.media_new(file_path)
                 # 添加选项让视频拉伸填充窗口
                 media.add_option(':no-keep-aspect-ratio')
-                # 循环播放：用VLC原生选项，不再依赖EndReached回调手动重播
-                if self.loop_play:
-                    media.add_option(':input-repeat=-1')
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
                 
@@ -1204,343 +955,18 @@ class VideoWindow(QFrame):
         self.is_playing = True
         return True
     
-
-    def _convert_ppt_to_images(self, ppt_path):
-        """将PPT转换为图片列表，返回图片路径列表"""
-        import hashlib
-        import subprocess
-        import tempfile
-        import shutil
-        print(f"[PPT] 开始转换: {ppt_path}")
-        
-        # 生成缓存目录
-        try:
-            with open(ppt_path, 'rb') as f:
-                file_hash = hashlib.md5(f.read()).hexdigest()[:8]
-        except Exception as e:
-            print(f"[PPT] 读取文件失败: {e}")
-            return None
-        
-        temp_dir = tempfile.gettempdir()
-        cache_dir = os.path.join(temp_dir, f"ppt_slides_{file_hash}")
-        print(f"[PPT] 缓存目录: {cache_dir}")
-        
-        # 检查缓存
-        if os.path.exists(cache_dir):
-            try:
-                cache_files = os.listdir(cache_dir)
-                if cache_files:
-                    images = sorted([os.path.join(cache_dir, f) for f in cache_files if f.endswith('.png')])
-                    if images:
-                        print(f"[PPT] 使用缓存: {len(images)}张图片")
-                        return images
-                    else:
-                        print(f"[PPT] 缓存目录存在但无PNG文件，清空重新转换")
-                        shutil.rmtree(cache_dir)
-            except Exception as e:
-                print(f"[PPT] 检查缓存失败: {e}")
-        
-        os.makedirs(cache_dir, exist_ok=True)
-        
-        # 方案1：尝试使用python-pptx提取图片（不依赖Office）
-        images = self._convert_ppt_with_pptx(ppt_path, cache_dir)
-        if images and len(images) > 0:
-            return images
-        
-        # 方案2：Windows下用WPS/Office COM
-        if platform.system() == 'Windows':
-            # 先尝试WPS
-            images = self._convert_ppt_with_wps(ppt_path, cache_dir)
-            if images is not None and len(images) > 0:
-                return images
-            # 再尝试Office PowerPoint
-            images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
-            if images is not None and len(images) > 0:
-                return images
-        
-        # 方案3：LibreOffice方案
-        print("[PPT] COM方案失败，尝试LibreOffice...")
-        result = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
-        if result:
-            print(f"[PPT] LibreOffice成功，{len(result)}张图片")
-        return result
-    
-    def _convert_ppt_with_pptx(self, ppt_path, cache_dir):
-        """使用python-pptx提取PPT中的图片（不依赖Office COM）"""
-        try:
-            from pptx import Presentation
-            from PIL import Image
-            import io
-            
-            print(f"[PPT] 尝试使用python-pptx提取图片...")
-            prs = Presentation(ppt_path)
-            images = []
-            
-            for slide_num, slide in enumerate(prs.slides, 1):
-                slide_images = []
-                for shape in slide.shapes:
-                    if hasattr(shape, 'image'):
-                        try:
-                            img = shape.image
-                            img_bytes = img.blob
-                            img_ext = img.ext
-                            
-                            # 转为PNG格式保存
-                            img_name = f"slide_{slide_num:03d}_shape_{len(slide_images):03d}.png"
-                            img_path = os.path.join(cache_dir, img_name)
-                            
-                            # PIL处理
-                            pil_img = Image.open(io.BytesIO(img_bytes))
-                            if pil_img.mode in ('RGBA', 'P'):
-                                pil_img = pil_img.convert('RGB')
-                            pil_img.save(img_path, 'PNG')
-                            slide_images.append(img_path)
-                            print(f"[PPT] 第{slide_num}页提取到{len(slide_images)}个图片")
-                        except Exception as img_err:
-                            print(f"[PPT] 提取图片失败: {img_err}")
-                            continue
-                
-                # 如果幻灯片没有图片，创建空白图片占位
-                if not slide_images:
-                    blank_path = os.path.join(cache_dir, f"slide_{slide_num:03d}.png")
-                    # 获取幻灯片尺寸
-                    slide_width = prs.slide_width
-                    slide_height = prs.slide_height
-                    # 创建白色背景图
-                    blank_img = Image.new('RGB', (int(slide_width/914400), int(slide_height/914400)), 'white')
-                    blank_img.save(blank_path, 'PNG')
-                    images.append(blank_path)
-                    print(f"[PPT] 第{slide_num}页无图片，创建空白占位")
-                else:
-                    # 合并所有图片为一张（垂直拼接）
-                    if len(slide_images) == 1:
-                        images.append(slide_images[0])
-                    else:
-                        merged_path = os.path.join(cache_dir, f"slide_{slide_num:03d}.png")
-                        self._merge_images_vertical(slide_images, merged_path)
-                        images.append(merged_path)
-            
-            if images:
-                print(f"[PPT] python-pptx成功提取{len(images)}张幻灯片")
-            return images
-            
-        except ImportError:
-            print("[PPT] python-pptx未安装，跳过")
-        except Exception as e:
-            print(f"[PPT] python-pptx方案失败: {e}")
-        return None
-    
-    def _merge_images_vertical(self, image_paths, output_path):
-        """垂直拼接多张图片"""
-        try:
-            from PIL import Image
-            images = [Image.open(p) for p in image_paths]
-            widths, heights = zip(*(i.size for i in images))
-            total_height = sum(heights)
-            max_width = max(widths)
-            
-            merged = Image.new('RGB', (max_width, total_height), 'white')
-            y_offset = 0
-            for img in images:
-                merged.paste(img, (0, y_offset))
-                y_offset += img.height
-            
-            merged.save(output_path, 'PNG')
-        except Exception as e:
-            print(f"[PPT] 合并图片失败: {e}")
-            # 失败时保留第一张
-            if image_paths:
-                import shutil
-                shutil.copy(image_paths[0], output_path)
-    
-    def _convert_ppt_with_wps(self, ppt_path, cache_dir):
-        """Windows下用WPS转换PPT为图片（使用PowerShell调用COM）"""
+    def _convert_ppt_with_powerpoint(self, ppt_path, cache_dir):
+        """Windows下用PowerPoint COM转换PPT为图片"""
         import time
-        import subprocess
-        
-        # WPS的ProgID列表
-        wps_progids = [
-            "WPP.Application",      # WPS演示
-            "WPS.Application",       # WPS
-            "PowerPoint.Application", # Microsoft Office
-        ]
-        
-        print("[PPT] 尝试WPS/Office方案（PowerShell）...")
-        
-        for progid in wps_progids:
-            print(f"[PPT] 尝试 ProgID: {progid}")
-            result = self._convert_ppt_with_powershell(progid, ppt_path, cache_dir)
-            if result:
-                return result
-        
-        print("[PPT] 所有PowerShell方案都失败")
-        return None
-    
-    def _convert_ppt_with_powershell(self, progid, ppt_path, cache_dir):
-        """使用PowerShell调用COM转换PPT"""
-        import subprocess
-        
-        try:
-            # 构建PowerShell脚本
-            abs_path = os.path.abspath(ppt_path).replace('\\', '\\\\').replace("'", "''")
-            abs_cache = os.path.abspath(cache_dir).replace('\\', '\\\\').replace("'", "''")
-            
-            ps_script = f'''
-$ErrorActionPreference = 'Stop'
-try {{
-    $wps = New-Object -ComObject {progid}
-    $wps.Visible = $false
-    
-    Write-Host "[PPT] 正在打开PPT..."
-    $presentation = $wps.Presentations.Open('{abs_path}', $false, $true, $false)
-    
-    Write-Host "[PPT] 正在导出PNG..."
-    $presentation.Export('{abs_cache}', 'PNG')
-    
-    Write-Host "[PPT] 正在关闭..."
-    $presentation.Close()
-    $wps.Quit()
-    
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($wps) | Out-Null
-    Write-Host "[PPT] 成功"
-    exit 0
-}} catch {{
-    Write-Host "[PPT] 错误: $($_.Exception.Message)"
-    exit 1
-}}
-'''
-            
-            print(f"[PPT] 执行PowerShell: {progid}")
-            
-            # 写入临时脚本文件（ANSI编码避免PowerShell解析错误）
-            import tempfile
-            script_path = os.path.join(tempfile.gettempdir(), "ppt_convert.ps1")
-            
-            with open(script_path, 'w', encoding='ansi') as f:
-                f.write(ps_script)
-            
-            # 执行PowerShell脚本（同步执行，隐藏窗口）
-            result = subprocess.run(
-                ['powershell', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script_path],
-                capture_output=True, text=True, timeout=60
-            )
-            
-            # 输出日志
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(f"[PPT] PowerShell错误: {result.stderr}")
-            
-            # 清理脚本文件
-            try:
-                import os as os_module
-                os_module.remove(script_path)
-            except:
-                pass
-            
-            # 检查是否成功
-            if result.returncode == 0 and os.path.exists(cache_dir):
-                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
-                if images:
-                    print(f"[PPT] PowerShell({progid})成功，{len(images)}张图片")
-                    return images
-            
-            print(f"[PPT] PowerShell({progid})未生成图片")
-            return None
-            
-        except subprocess.TimeoutExpired:
-            print(f"[PPT] PowerShell({progid})执行超时（60秒）")
-            return None
-        except Exception as e:
-            print(f"[PPT] PowerShell方案异常: {e}")
-            return None
-    
-    def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
-        """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
-        import time
-        
-        # ========== 清理之前残留的 PowerPoint 进程 ==========
-        # 有些系统PowerPoint进程没彻底退出，会锁住文件
-        # 尝试强制结束所有 PowerPoint 进程（最多等3秒）
-        for _ in range(6):
-            try:
-                subprocess.run(
-                    ['taskkill', '/F', '/IM', 'POWERPNT.EXE'],
-                    capture_output=True, timeout=3
-                )
-            except:
-                pass
-            time.sleep(0.5)
-        
-        # 定义MsoTriState常量
-        msoFalse = 0  # 不保存更改
-        
-        # 方案1：win32com（pywin32，最稳定）
         try:
             import win32com.client
             import pythoncom
-            pythoncom.CoInitialize()
             
-            try:
-                powerpoint = win32com.client.Dispatch("PowerPoint.Application")
-                # 有些系统需要设置Visible=False但不支持，用try保护
-                try:
-                    powerpoint.Visible = False
-                except:
-                    pass
-                
-                abs_path = os.path.abspath(ppt_path)
-                abs_cache = os.path.abspath(cache_dir)
-                
-                # 打开PPT时捕获异常，防止文件被锁
-                try:
-                    presentation = powerpoint.Presentations.Open(
-                        abs_path,
-                        WithWindow=False,
-                        ReadOnly=True
-                    )
-                except Exception as open_err:
-                    print(f"打开PPT文件失败: {open_err}")
-                    raise
-                
-                # 导出为PNG图片
-                presentation.Export(abs_cache, "PNG")
-                
-                # 关闭时必须用MsoTriState，而不是布尔值
-                try:
-                    presentation.Close(msoFalse)  # msoFalse=0, 不保存更改
-                except:
-                    try:
-                        presentation.Close(False)
-                    except:
-                        pass
-                
-                # 收集导出的图片
-                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
-                if images:
-                    print(f"[PPT] win32com成功，{len(images)}张图片，路径: {images[0]}")
-                    return images
-                print("[PPT] win32com: 收集图片为空")
-            except Exception as e:
-                print(f"[PPT] win32com异常: {type(e).__name__}: {e}")
-            finally:
-                try:
-                    powerpoint.Quit()
-                except:
-                    pass
-                pythoncom.CoUninitialize()
-        except ImportError:
-            print("win32com未安装，尝试comtypes")
-        
-        # 方案2：comtypes
-        try:
-            import comtypes.client
-            import pythoncom
-            
-            # 清理之前的PowerPoint进程
+            # 清理残留进程
             for _ in range(3):
                 try:
-                    subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], capture_output=True, timeout=2)
+                    subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], 
+                                   capture_output=True, timeout=2)
                 except:
                     pass
                 time.sleep(0.3)
@@ -1548,7 +974,7 @@ try {{
             pythoncom.CoInitialize()
             
             try:
-                powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
+                powerpoint = win32com.client.Dispatch("PowerPoint.Application")
                 try:
                     powerpoint.Visible = False
                 except:
@@ -1557,56 +983,80 @@ try {{
                 abs_path = os.path.abspath(ppt_path)
                 abs_cache = os.path.abspath(cache_dir)
                 
-                presentation = powerpoint.Presentations.Open(
-                    abs_path,
-                    WithWindow=False
-                )
-                
+                presentation = powerpoint.Presentations.Open(abs_path, WithWindow=False, ReadOnly=True)
                 presentation.Export(abs_cache, "PNG")
                 
                 try:
-                    presentation.Close(msoFalse)
+                    presentation.Close(0)  # msoFalse = 0
                 except:
                     presentation.Close(False)
                 
                 powerpoint.Quit()
-                
                 pythoncom.CoUninitialize()
                 
-                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+                # 收集图片
+                images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) 
+                               if f.lower().endswith('.png')])
                 if images:
+                    print(f"[PPT] COM成功，{len(images)}张图片")
                     return images
+                print("[PPT] COM: 收集图片为空")
             except Exception as e:
-                print(f"comtypes PowerPoint转换失败: {e}")
-        except ImportError:
-            print("comtypes也未安装")
-        except Exception as e:
-            print(f"comtypes方案失败: {e}")
-        finally:
-            try:
+                print(f"[PPT] COM异常: {e}")
+                try:
+                    powerpoint.Quit()
+                except:
+                    pass
                 pythoncom.CoUninitialize()
-            except:
-                pass
+                
+        except ImportError:
+            print("[PPT] win32com未安装")
+        except Exception as e:
+            print(f"[PPT] COM方案失败: {e}")
         
         return None
-    
-    def _convert_ppt_with_libreoffice(self, ppt_path, cache_dir):
-        """LibreOffice方案转换PPT"""
+
+
+    def _convert_ppt_to_images(self, ppt_path):
+        """将PPT转换为图片列表，返回图片路径列表"""
+        import hashlib
         import subprocess
+        import tempfile
         import fitz
-        import shutil
         
-        # 在转换前清理旧缓存（确保干净的目录）
-        if os.path.exists(cache_dir):
-            try:
-                shutil.rmtree(cache_dir)
-            except:
-                pass
+        # 生成缓存目录（使用系统临时目录）
+        file_hash = hashlib.md5(open(ppt_path, 'rb').read()).hexdigest()[:8]
+        cache_dir = os.path.join(tempfile.gettempdir(), f"ppt_slides_{file_hash}")
+        
+        # 如果已有缓存，直接返回
+        if os.path.exists(cache_dir) and os.listdir(cache_dir):
+            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.endswith('.png')])
+            if images:
+                return images
+        
         os.makedirs(cache_dir, exist_ok=True)
+        
+        # Windows优先用PowerPoint COM自动化
+        if platform.system() == 'Windows':
+            images = self._convert_ppt_with_powerpoint(ppt_path, cache_dir)
+            if images is not None:
+                return images
+        
+        # 检查LibreOffice锁文件（如果正在运行，直接返回None）
+        if self._check_libreoffice_lock():
+            print("LibreOffice正在运行中，请先关闭LibreOffice")
+            return None
         
         # 检查LibreOffice
         soffice = None
-        if platform.system() == 'Windows':
+        for cmd in ['libreoffice', 'soffice']:
+            result = subprocess.run(['which', cmd], capture_output=True, text=True)
+            if result.returncode == 0:
+                soffice = cmd.strip()
+                break
+        
+        # Windows路径检查
+        if not soffice and platform.system() == 'Windows':
             win_paths = [
                 r'C:\Program Files\LibreOffice\program\soffice.exe',
                 r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
@@ -1615,23 +1065,16 @@ try {{
                 if os.path.exists(wp):
                     soffice = wp
                     break
-        else:
-            for cmd in ['libreoffice', 'soffice']:
-                result = subprocess.run(['which', cmd], capture_output=True, text=True)
-                if result.returncode == 0:
-                    soffice = cmd.strip()
-                    break
         
         if not soffice:
             return None  # 没有LibreOffice
         
-        # PPT → PDF（加--norestore避免锁文件卡死，超时30秒）
+        # PPT → PDF（使用--norestore参数，timeout从120秒降到60秒）
         try:
-            subprocess.run([soffice, '--headless', '--norestore', '--convert-to', 'pdf', 
-                           ppt_path, '--outdir', cache_dir], 
-                           capture_output=True, timeout=30)
+            subprocess.run([soffice, '--headless', '--norestore', '--convert-to', 'pdf', ppt_path, '--outdir', cache_dir], 
+                           capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
-            print("PPT转PDF超时（30秒）")
+            print("PPT转PDF超时(60秒)，LibreOffice可能卡住了")
             return None
         except Exception as e:
             print(f"PPT转PDF失败: {e}")
@@ -1644,45 +1087,54 @@ try {{
         
         pdf_path = os.path.join(cache_dir, pdf_files[0])
         
-        # PDF → 图片（逐页处理，及时释放内存）
+        # PDF → 图片
         try:
             doc = fitz.open(pdf_path)
             images = []
-            total_pages = len(doc)
-            print(f"[PPT] PDF共{total_pages}页，开始转换...")
-            for page_num in range(total_pages):
-                try:
-                    page = doc[page_num]
-                    # 使用1.5倍缩放（降低内存占用），可根据需要调整
-                    mat = fitz.Matrix(1.5, 1.5)
-                    pix = page.get_pixmap(matrix=mat)
-                    img_path = os.path.join(cache_dir, f"slide_{page_num+1:03d}.png")
-                    pix.save(img_path)
-                    images.append(img_path)
-                    # 显式释放内存
-                    pix = None
-                    page = None
-                    print(f"[PPT] 已转换第{page_num+1}/{total_pages}页")
-                except MemoryError:
-                    print(f"[PPT] 第{page_num+1}页内存不足，停止转换")
-                    raise
-                except Exception as page_err:
-                    print(f"[PPT] 第{page_num+1}页转换失败: {page_err}")
-                    continue
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                mat = fitz.Matrix(2, 2)  # 2x缩放，提高清晰度
+                pix = page.get_pixmap(matrix=mat)
+                img_path = os.path.join(cache_dir, f"slide_{page_num+1:03d}.png")
+                pix.save(img_path)
+                images.append(img_path)
             doc.close()
             # 删除PDF节省空间
-            try:
-                os.remove(pdf_path)
-            except:
-                pass
-        except MemoryError:
-            print("[PPT] MemoryError: PDF转图片时内存不足")
-            return None
+            os.remove(pdf_path)
         except Exception as e:
             print(f"PDF转图片失败: {e}")
             return None
         
         return images
+    
+    def _check_libreoffice_lock(self):
+        """检查LibreOffice锁文件，返回True表示正在运行"""
+        try:
+            if platform.system() == 'Windows':
+                lock_paths = [
+                    os.path.expanduser('~/.config/libreoffice'),
+                    os.path.join(os.environ.get('APPDATA', ''), 'LibreOffice'),
+                ]
+            else:
+                lock_paths = [
+                    os.path.expanduser('~/.config/libreoffice'),
+                    '/tmp/.libreoffice',
+                ]
+            
+            for lock_dir in lock_paths:
+                if os.path.exists(lock_dir):
+                    # 检查.lock文件
+                    lock_file = os.path.join(lock_dir, '.lock')
+                    if os.path.exists(lock_file):
+                        return True
+                    # 检查子目录中的锁文件
+                    for root, dirs, files in os.walk(lock_dir):
+                        for f in files:
+                            if f.endswith('.lock'):
+                                return True
+        except Exception as e:
+            print(f"检查锁文件失败: {e}")
+        return False
 
     def _show_ppt(self, file_path):
         """显示PPT文件"""
@@ -1699,14 +1151,6 @@ try {{
         if hasattr(self, '_ppt_timer'):
             self._ppt_timer.stop()
         
-        # 停止之前的转换线程
-        if hasattr(self, '_ppt_convert_thread') and self._ppt_convert_thread is not None:
-            try:
-                self._ppt_convert_thread.quit()
-                self._ppt_convert_thread.wait(1000)
-            except:
-                pass
-        
         # 显示加载提示
         self.image_label.setText("正在加载PPT...")
         self.image_label.setStyleSheet("""
@@ -1718,61 +1162,33 @@ try {{
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.show()
         self.video_frame.hide()
-        self._ppt_loading = True
         QApplication.processEvents()
         
-        # 在后台线程中转换PPT
-        ppt_path_ref = file_path
+        # 转换PPT为图片
+        images = self._convert_ppt_to_images(file_path)
         
-        class PPTConvertThread(QThread):
-            finished = pyqtSignal(list)    # 成功，返回图片列表
-            error = pyqtSignal(str)        # 失败，返回错误信息
-            
-            def __init__(self, parent_window, ppt_path):
-                super().__init__()
-                self.parent_window = parent_window
-                self.ppt_path = ppt_path
-            
-            def run(self):
-                try:
-                    images = self.parent_window._convert_ppt_to_images(self.ppt_path)
-                    if images is not None and len(images) > 0:
-                        self.finished.emit(images)
-                    else:
-                        self.error.emit("PPT转换失败，请检查是否安装了Office或LibreOffice")
-                except Exception as e:
-                    # 构建详细错误信息
-                    err_parts = [type(e).__name__]
-                    s = str(e)
-                    if s.strip():
-                        err_parts.append(s)
-                    if e.args:
-                        err_parts.append(repr(e.args))
-                    # COM异常常见属性
-                    for attr in ['hresult', 'text', 'strerror', 'reason', '陪件']:
-                        if hasattr(e, attr):
-                            v = getattr(e, attr)
-                            if v and str(v).strip():
-                                err_parts.append(f"{attr}={v}")
-                    err_msg = " | ".join(err_parts)
-                    print(f"[PPT ERROR] {err_msg}")
-                    self.error.emit("PPT转换出错: " + err_msg)
-                    # 同时通过父窗口记日志
-                    try:
-                        self.parent_window.log(f"PPT转换失败: {err_msg}")
-                    except:
-                        pass
+        if images is None:
+            # 没有LibreOffice，显示提示
+            self.image_label.setText("PPT预览需要安装LibreOffice\n请安装后重试")
+            self.image_label.setStyleSheet("""
+                background-color: black;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            """)
+            self.is_playing = False
+            return False
         
-        self._ppt_convert_thread = PPTConvertThread(self, ppt_path_ref)
-        self._ppt_convert_thread.finished.connect(self._on_ppt_converted)
-        self._ppt_convert_thread.error.connect(self._on_ppt_convert_error)
-        self._ppt_convert_thread.start()
-        return True
-    
-    def _on_ppt_converted(self, images):
-        """PPT转换完成回调"""
-        if not self._ppt_loading:
-            return
+        if not images:
+            self.image_label.setText("PPT转换失败\n请检查文件是否损坏")
+            self.image_label.setStyleSheet("""
+                background-color: black;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            """)
+            self.is_playing = False
+            return False
         
         # 保存PPT图片列表和当前页码
         self._ppt_images = images
@@ -1788,24 +1204,7 @@ try {{
         self._ppt_timer.start(5000)
         
         self.is_playing = True
-        self._ppt_loading = False
-    
-    def _on_ppt_convert_error(self, error_msg):
-        """PPT转换失败回调"""
-        print(f"[PPT] _on_ppt_convert_error called, msg='{error_msg}'")
-        if not error_msg or not error_msg.strip():
-            # 异常消息为空，说明是内部静默失败，不显示空白
-            self.image_label.setText("PPT预览失败\n转换过程异常（无详细错误）")
-        else:
-            self.image_label.setText(f"PPT预览失败\n{error_msg}")
-        self.image_label.setStyleSheet("""
-            background-color: black;
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-        """)
-        self.is_playing = False
-        self._ppt_loading = False
+        return True
 
     def _show_ppt_page(self, page_index):
         """显示PPT指定页"""
@@ -1837,10 +1236,8 @@ try {{
     def _safe_apply_volume(self):
         """安全地应用音量设置"""
         try:
-            if hasattr(self, 'vlc_player') and self.use_vlc and self.is_playing:
-                vol = 0 if self.is_muted else self.volume
-                result = self.vlc_player.audio_set_volume(vol)
-                print(f"[DEBUG] window{self.window_id} _safe_apply_volume: muted={self.is_muted}, vol={vol}, result={result}")
+            if hasattr(self, 'vlc_player') and self.use_vlc and not self.is_muted and self.is_playing:
+                self.vlc_player.audio_set_volume(self.volume)
         except:
             pass
     
@@ -1864,27 +1261,11 @@ try {{
             else:
                 self.media_player.pause()
             self.is_playing = False
-            self._was_paused = True  # 标记为暂停状态，play()时可恢复
-        except:
-            pass
-    
-    def _resume(self):
-        """恢复播放（从暂停处继续）"""
-        try:
-            if self.use_vlc:
-                self.vlc_player.play()
-            else:
-                self.media_player.play()
-            self.is_playing = True
-            self._was_paused = False
-            if self.use_vlc:
-                QTimer.singleShot(300, self._safe_apply_volume)
         except:
             pass
     
     def stop(self):
         """停止"""
-        self._was_paused = False  # 停止后清除暂停标记
         # 隐藏图片标签，恢复视频显示
         if hasattr(self, 'image_label'):
             self.image_label.hide()
@@ -1923,12 +1304,7 @@ try {{
         return result
         
     def next_media(self):
-        """下一个媒体 / PPT下一页"""
-        # 如果正在播放PPT，翻到下一页
-        if hasattr(self, '_ppt_images') and self._ppt_images and self.is_playing:
-            next_page = (self._ppt_current_page + 1) % len(self._ppt_images)
-            self._show_ppt_page(next_page)
-            return True
+        """下一个媒体"""
         if self.media_files:
             self.current_index = (self.current_index + 1) % len(self.media_files)
             result = self.play()
@@ -1940,12 +1316,7 @@ try {{
         return False
     
     def prev_media(self):
-        """上一个媒体 / PPT上一页"""
-        # 如果正在播放PPT，翻到上一页
-        if hasattr(self, '_ppt_images') and self._ppt_images and self.is_playing:
-            prev_page = (self._ppt_current_page - 1) % len(self._ppt_images)
-            self._show_ppt_page(prev_page)
-            return True
+        """上一个媒体"""
         if self.media_files:
             self.current_index = (self.current_index - 1) % len(self.media_files)
             result = self.play()
@@ -1961,8 +1332,7 @@ try {{
         self.volume = max(0, min(100, volume))
         if not self.is_muted:
             if self.use_vlc:
-                result = self.vlc_player.audio_set_volume(self.volume)
-                print(f"[DEBUG] window{self.window_id} set_volume={self.volume}, muted={self.is_muted}, result={result}")
+                self.vlc_player.audio_set_volume(self.volume)
             else:
                 self.media_player.setVolume(self.volume)
     
@@ -1970,9 +1340,7 @@ try {{
         """切换静音"""
         self.is_muted = not self.is_muted
         if self.use_vlc:
-            vol = 0 if self.is_muted else self.volume
-            result = self.vlc_player.audio_set_volume(vol)
-            print(f"[DEBUG] window{self.window_id} toggle_mute: muted={self.is_muted}, vol={vol}, result={result}")
+            self.vlc_player.audio_set_volume(0 if self.is_muted else self.volume)
         else:
             self.media_player.setVolume(0 if self.is_muted else self.volume)
         return self.is_muted
@@ -2006,8 +1374,11 @@ try {{
         return self.is_locked
     
     def keyPressEvent(self, event):
-        """按键事件 - V键/PageDown由全局快捷键处理，这里不重复处理"""
-        if event.key() == Qt.Key_Escape:
+        """按键事件"""
+        if event.key() in [Qt.Key_V, Qt.Key_PageDown]:
+            self.toggle_lock()
+            event.accept()
+        elif event.key() == Qt.Key_Escape:
             if self.isFullScreen():
                 self.showNormal()
             event.accept()
@@ -2049,18 +1420,8 @@ try {{
         """获取窗口位置和大小"""
         geometry = self.geometry()
         return geometry.x(), geometry.y(), geometry.width(), geometry.height()
-    
-    def hide_window(self):
-        """隐藏窗口（停止播放+不可见）"""
-        self.stop()
-        self.hide()
-        self.is_visible = False
-    
-    def show_window(self):
-        """显示窗口（可见+开始播放）"""
-        self.show()
-        self.is_visible = True
-        self.play()
+
+
 # ============== 网络通信类 ==============
 
 class NetworkManager(QThread):
@@ -2333,24 +1694,22 @@ class SerialManager(QThread):
         return []
 
 
-
 # ============== 激活对话框 ==============
 
 class ActivationDialog(QDialog):
-    """激活对话框 - 注册码/激活码方式"""
+    """激活对话框"""
     
-    def __init__(self, parent=None, expired=False):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.resize(520, 380)
-        self.expired = expired
+        self.resize(500, 300)
         self.init_ui()
         
     def init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(20)
         
         # 标题
         title = QLabel("坤展成-中控多窗口播放器")
@@ -2358,40 +1717,25 @@ class ActivationDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        if self.expired:
-            warn = QLabel("⚠ 试用期已结束，请激活后继续使用")
-            warn.setStyleSheet("color: red; font-size: 13px; font-weight: bold;")
-            warn.setAlignment(Qt.AlignCenter)
-            layout.addWidget(warn)
+        # 机器码
+        machine_code_label = QLabel("机器码：")
+        layout.addWidget(machine_code_label)
         
-        # 注册码（机器码）
-        reg_label = QLabel("注册码（请发送给经销商获取激活码）：")
-        layout.addWidget(reg_label)
+        self.machine_code_edit = QLineEdit()
+        self.machine_code_edit.setReadOnly(True)
+        self.machine_code_edit.setText(LicenseManager.get_machine_code())
+        layout.addWidget(self.machine_code_edit)
         
-        reg_layout = QHBoxLayout()
-        self.reg_code_edit = QLineEdit()
-        self.reg_code_edit.setReadOnly(True)
-        self.reg_code_edit.setText(LicenseManager.get_machine_code())
-        self.reg_code_edit.setStyleSheet("background-color: #f0f0f0; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
-        reg_layout.addWidget(self.reg_code_edit)
+        # 授权码
+        license_label = QLabel("授权码：")
+        layout.addWidget(license_label)
         
-        copy_btn = QPushButton("复制")
-        copy_btn.setFixedWidth(60)
-        copy_btn.clicked.connect(self.copy_reg_code)
-        reg_layout.addWidget(copy_btn)
-        layout.addLayout(reg_layout)
+        self.license_edit = QLineEdit()
+        self.license_edit.setPlaceholderText("请输入授权码")
+        layout.addWidget(self.license_edit)
         
-        # 激活码输入
-        act_label = QLabel("激活码：")
-        layout.addWidget(act_label)
-        
-        self.act_code_edit = QLineEdit()
-        self.act_code_edit.setPlaceholderText("请输入激活码（格式：XXXX-XXXX-XXXX-XXXX）")
-        self.act_code_edit.setStyleSheet("font-size: 16px; letter-spacing: 2px;")
-        layout.addWidget(self.act_code_edit)
-        
-        # 提示
-        hint = QLabel("请联系经销商（18210234280）获取激活码")
+        # 提示信息
+        hint = QLabel("请联系经销商获取授权码")
         hint.setStyleSheet("color: gray;")
         hint.setAlignment(Qt.AlignCenter)
         layout.addWidget(hint)
@@ -2399,10 +1743,8 @@ class ActivationDialog(QDialog):
         # 按钮
         btn_layout = QHBoxLayout()
         self.ok_btn = QPushButton("激活")
-        self.ok_btn.setStyleSheet("background-color: #4488ff; color: white; font-size: 14px; padding: 8px 30px; border-radius: 4px;")
         self.ok_btn.clicked.connect(self.do_activation)
-        cancel_btn = QPushButton("退出" if self.expired else "取消")
-        cancel_btn.setStyleSheet("font-size: 14px; padding: 8px 30px;")
+        cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.ok_btn)
         btn_layout.addWidget(cancel_btn)
@@ -2410,27 +1752,21 @@ class ActivationDialog(QDialog):
         
         self.setLayout(layout)
         
-    def copy_reg_code(self):
-        """复制注册码到剪贴板"""
-        clipboard = QApplication.clipboard()
-        clipboard.setText(self.reg_code_edit.text())
-        self.reg_code_edit.setStyleSheet("background-color: #d4edda; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
-        QTimer.singleShot(1500, lambda: self.reg_code_edit.setStyleSheet("background-color: #f0f0f0; font-size: 16px; font-weight: bold; letter-spacing: 2px;"))
-    
     def do_activation(self):
         """执行激活"""
-        reg_code = self.reg_code_edit.text().strip()
-        act_code = self.act_code_edit.text().strip()
-        if not act_code:
-            QMessageBox.warning(self, "提示", "请输入激活码")
+        license_key = self.license_edit.text().strip()
+        if not license_key:
+            QMessageBox.warning(self, "提示", "请输入授权码")
             return
         
-        success, msg = LicenseManager.activate(reg_code, act_code)
-        if success:
-            QMessageBox.information(self, "成功", "激活成功！感谢您的授权。")
+        valid, msg = LicenseManager.verify_license(license_key)
+        if valid:
+            LicenseManager.save_license(license_key)
+            QMessageBox.information(self, "成功", "激活成功！")
             self.accept()
         else:
             QMessageBox.warning(self, "失败", msg)
+
 
 # ============== 关于对话框 ==============
 
@@ -2579,9 +1915,6 @@ class MainWindow(QMainWindow):
         
         # 初始化UI
         self.init_ui()
-        
-        # 控制面板始终置顶，保持在视频窗口之上
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # 连接信号
         self.connect_signals()
@@ -3017,48 +2350,6 @@ class MainWindow(QMainWindow):
         btn_row2.addWidget(mute_cmd_label)
         control_layout.addLayout(btn_row2)
         
-        # 第三行：PPT翻页按钮
-        btn_row3 = QHBoxLayout()
-        self.ppt_prev_btn = QPushButton("◀ 上一页")
-        self.ppt_prev_btn.setToolTip("PPT上一页 | UDP指令: prev")
-        self.ppt_prev_btn.clicked.connect(self.prev_media)
-        btn_row3.addWidget(self.ppt_prev_btn)
-        ppt_prev_cmd_label = QLabel("prev")
-        ppt_prev_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
-        ppt_prev_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        btn_row3.addWidget(ppt_prev_cmd_label)
-        
-        self.ppt_next_btn = QPushButton("下一页 ▶")
-        self.ppt_next_btn.setToolTip("PPT下一页 | UDP指令: next")
-        self.ppt_next_btn.clicked.connect(self.next_media)
-        btn_row3.addWidget(self.ppt_next_btn)
-        ppt_next_cmd_label = QLabel("next")
-        ppt_next_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
-        ppt_next_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        btn_row3.addWidget(ppt_next_cmd_label)
-        control_layout.addLayout(btn_row3)
-        
-        # 第四行：隐藏/显示窗口按钮
-        btn_row4 = QHBoxLayout()
-        self.hide_window_btn = QPushButton("👁 隐藏窗口")
-        self.hide_window_btn.setToolTip("UDP指令: hide")
-        self.hide_window_btn.clicked.connect(self.hide_current_window)
-        btn_row4.addWidget(self.hide_window_btn)
-        hide_cmd_label = QLabel("hide")
-        hide_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
-        hide_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        btn_row4.addWidget(hide_cmd_label)
-        
-        self.show_window_btn = QPushButton("👁 显示窗口")
-        self.show_window_btn.setToolTip("UDP指令: show")
-        self.show_window_btn.clicked.connect(self.show_current_window)
-        btn_row4.addWidget(self.show_window_btn)
-        show_cmd_label = QLabel("show")
-        show_cmd_label.setStyleSheet("color: #888; font-size: 10px;")
-        show_cmd_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        btn_row4.addWidget(show_cmd_label)
-        control_layout.addLayout(btn_row4)
-        
         # UDP端口显示
         self.cmd_port_label = QLabel("UDP端口: 8888 | TCP端口: 8892")
         self.cmd_port_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
@@ -3069,12 +2360,6 @@ class MainWindow(QMainWindow):
         play_num_label.setStyleSheet("color: #888; font-size: 10px; padding: 2px;")
         play_num_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         control_layout.addWidget(play_num_label)
-        
-        # 隐藏/显示窗口指令提示
-        hide_show_label = QLabel("隐藏/显示: hide/show (隐藏后视频继续播放)")
-        hide_show_label.setStyleSheet("color: #888; font-size: 10px; padding: 2px;")
-        hide_show_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        control_layout.addWidget(hide_show_label)
         
         control_group.setLayout(control_layout)
         # 默认隐藏，窗口打开后才显示
@@ -3398,20 +2683,9 @@ class MainWindow(QMainWindow):
             self.trial_label.setStyleSheet("color: green; font-weight: bold;")
             self.activate_btn.setEnabled(False)
         else:
-            if remaining is not None and remaining <= 0:
-                self.trial_label.setText(status)
-                self.trial_label.setStyleSheet("color: red; font-weight: bold;")
-                # 试用期结束，弹出激活对话框
-                dialog = ActivationDialog(self, expired=True)
-                if dialog.exec_() != QDialog.Accepted:
-                    # 用户拒绝激活，关闭主窗口
-                    self.close()
-                    return
-                self.check_license()
-            else:
-                self.trial_label.setText(f"剩余{remaining}天试用期")
-                if "异常" in status:
-                    self.trial_label.setStyleSheet("color: red; font-weight: bold;")
+            self.trial_label.setText(f"剩余{remaining}天试用期")
+            if remaining <= 0:
+                QMessageBox.warning(self, "试用期结束", "试用期已结束，请激活软件！")
     
     def show_activation_dialog(self):
         """显示激活对话框"""
@@ -3465,19 +2739,6 @@ class MainWindow(QMainWindow):
             self.y_spin.blockSignals(False)
             self.width_spin.blockSignals(False)
             self.height_spin.blockSignals(False)
-            
-            # 同步当前窗口的音量和静音状态到UI
-            window = self.video_windows[window_id]
-            self.volume_slider.blockSignals(True)
-            self.volume_slider.setValue(window.volume)
-            self.volume_label.setText(f"{window.volume}%")
-            self.volume_slider.blockSignals(False)
-            mute_text = "🔇 取消静音" if window.is_muted else "🔊 静音"
-            self.mute_btn.setText(mute_text)
-            self.mute_btn2.setText(mute_text)
-            self.loop_btn.blockSignals(True)
-            self.loop_btn.setChecked(window.loop_play)
-            self.loop_btn.blockSignals(False)
         
         # 更新媒体列表显示（显示当前窗口的媒体列表）
         self.update_media_list_display()
@@ -3545,7 +2806,6 @@ class MainWindow(QMainWindow):
                 window = VideoWindow(self.current_window_id)
                 window.clicked.connect(self.on_video_window_clicked)
                 window.window_closed.connect(self.on_video_window_closed)
-                window.config_manager = self.config_manager  # 注入配置管理器
                 self.video_windows[self.current_window_id] = window
                 
                 # 从配置加载该窗口保存的媒体文件
@@ -3576,26 +2836,21 @@ class MainWindow(QMainWindow):
             self.log(f"窗口{self.current_window_id}已打开")
     
     def on_video_window_clicked(self, window_id):
-        """视频窗口被点击"""
+        """视频窗口被点击 - 添加300ms防抖"""
         import time
         now = time.time()
         if hasattr(self, '_last_click_time') and now - self._last_click_time < 0.3:
-            return  # 300ms防抖
+            return  # 300ms防抖，避免频繁点击
         self._last_click_time = now
         
         try:
-            self.log(f"点击了窗口{window_id}，切换控制")
             self.select_window(window_id)
-            # 更新标签选中状态（blockSignals防止触发clicked再调select_window）
+            # 更新标签选中状态
             btn = self.window_tabs.button(window_id)
             if btn:
-                btn.blockSignals(True)
                 btn.setChecked(True)
-                btn.blockSignals(False)
-            else:
-                self.log(f"窗口{window_id}按钮未找到")
         except Exception as e:
-            self.log(f"窗口点击处理异常: {e}")
+            print(f"窗口点击处理异常: {e}")
     
     def on_video_window_closed(self, window_id):
         """视频窗口被关闭"""
@@ -3696,15 +2951,6 @@ class MainWindow(QMainWindow):
     
     def update_media_list_display(self):
         """更新媒体列表显示（表格形式，带编号、类型、控制指令、默认、模式）"""
-        # 标记正在更新，防止控件初始化时触发信号导致误操作（如重播视频）
-        self._updating_media_list = True
-        try:
-            self._update_media_list_display_impl()
-        finally:
-            self._updating_media_list = False
-    
-    def _update_media_list_display_impl(self):
-        """更新媒体列表显示的实际实现"""
         self.media_list.setRowCount(0)
         self.media_combo.clear()
         
@@ -3878,7 +3124,6 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, '_updating_media_list', False):
             return
-        self.log(f"[DEBUG] _on_default_radio_changed: row={row}, wid={window_id}")
         # 获取该行对应的文件
         num_item = self.media_list.item(row, 0)
         if num_item:
@@ -3899,7 +3144,6 @@ class MainWindow(QMainWindow):
         """表格中播放模式下拉变化 (0=播放一遍, 1=循环播放)"""
         if getattr(self, '_updating_media_list', False):
             return
-        self.log(f"[DEBUG] _on_mode_changed: row={row}, wid={window_id}, idx={index}")
         num_item = self.media_list.item(row, 0)
         if num_item:
             idx = num_item.data(Qt.UserRole + 1)
@@ -3909,13 +3153,10 @@ class MainWindow(QMainWindow):
             # 如果是当前正在播放的媒体，同步循环状态
             if window_id in self.video_windows:
                 window = self.video_windows[window_id]
-                # 如果这个媒体正在播放，更新循环设置并重新应用
+                # 如果这个媒体正在播放，更新循环设置
                 if window.current_index == idx - 1:
                     window.loop_play = is_loop
                     self.loop_btn.setChecked(is_loop)
-                    # 重新设置media以应用循环选项变更
-                    if window.is_playing and window.use_vlc:
-                        window._apply_loop_to_current_media()
     
     def _on_minimize_to_tray_changed(self, state):
         """最小化到托盘设置变化"""
@@ -3993,8 +3234,6 @@ class MainWindow(QMainWindow):
     
     def on_media_combo_changed(self, index):
         """媒体下拉框改变"""
-        if getattr(self, '_updating_media_list', False):
-            return
         if index >= 0 and self.current_window_id in self.video_windows:
             file_path = self.media_combo.itemData(index)
             if file_path:
@@ -4013,9 +3252,6 @@ class MainWindow(QMainWindow):
         if self.current_window_id in self.video_windows:
             is_muted = self.video_windows[self.current_window_id].toggle_mute()
             self.mute_btn.setText("🔇 取消静音" if is_muted else "🔊 静音")
-            self.mute_btn2.setText("🔇 取消静音" if is_muted else "🔊 静音")
-            # 保存配置（静音状态需要持久化）
-            self._schedule_save_config()
     
     def play_window(self, window_id):
         """播放指定窗口"""
@@ -4067,10 +3303,6 @@ class MainWindow(QMainWindow):
             window.toggle_fullscreen()
         elif cmd == "loop":
             window.toggle_loop()
-        elif cmd == "hide":
-            window.hide_window()
-        elif cmd == "show":
-            window.show_window()
         elif cmd.isdigit():
             # 按编号播放: 如 "3" 表示播放第3个媒体
             idx = int(cmd) - 1
@@ -4220,7 +3452,6 @@ class MainWindow(QMainWindow):
                 window = VideoWindow(window_id)
                 window.clicked.connect(self.on_video_window_clicked)
                 window.window_closed.connect(self.on_video_window_closed)
-                window.config_manager = self.config_manager  # 注入配置管理器
                 self.video_windows[window_id] = window
                 
                 # 从配置加载该窗口保存的媒体文件
@@ -4261,8 +3492,8 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        # 控制面板始终置顶，保持在视频窗口之上
-        # 不再取消置顶
+        # 短暂延迟后取消置顶，避免主窗口一直遮挡视频窗口
+        QTimer.singleShot(500, self._remove_stays_on_top)
     
     def _remove_stays_on_top(self):
         """取消主窗口置顶（延迟执行，确保窗口已经显示到最前面）"""
@@ -4289,20 +3520,6 @@ class MainWindow(QMainWindow):
             if window.isVisible():
                 is_locked = window.toggle_lock()
                 self.log(f"窗口{self.current_window_id} {'锁定' if is_locked else '解锁'}")
-                # 保存配置（锁定状态需要持久化）
-                self._schedule_save_config()
-    
-    def hide_current_window(self):
-        """隐藏当前视频窗口"""
-        if self.current_window_id in self.video_windows:
-            self.video_windows[self.current_window_id].hide_window()
-            self.log(f"窗口{self.current_window_id}已隐藏")
-    
-    def show_current_window(self):
-        """显示当前视频窗口"""
-        if self.current_window_id in self.video_windows:
-            self.video_windows[self.current_window_id].show_window()
-            self.log(f"窗口{self.current_window_id}已显示")
     
     def log(self, message):
         """记录日志"""
@@ -4337,9 +3554,6 @@ class MainWindow(QMainWindow):
             # 关闭托盘图标
             self.tray_icon.hide()
             
-            # 清理Office进程，防止残留导致下次启动失败
-            self._kill_office_processes()
-            
             event.accept()
         else:
             event.ignore()
@@ -4361,26 +3575,7 @@ class MainWindow(QMainWindow):
         # 关闭托盘图标
         self.tray_icon.hide()
         
-        # 清理Office进程，防止残留导致下次启动失败
-        self._kill_office_processes()
-        
         QApplication.quit()
-    
-    def _kill_office_processes(self):
-        """清理Office进程（使用ctypes避免cmd窗口闪烁）"""
-        import ctypes
-        if platform.system() == 'Windows':
-            # 使用ctypes.windll调用taskkill，避免弹出cmd窗口
-            for proc_name in ['POWERPNT.EXE', 'soffice.exe']:
-                try:
-                    # /F 强制结束 /IM 指定进程名 /T 包括子进程
-                    ctypes.windll.shell32.ShellExecuteW(
-                        None, "runas", "taskkill", 
-                        f'/F /IM {proc_name}', 
-                        None, 0  # SW_HIDE = 0
-                    )
-                except:
-                    pass
     
     def _schedule_save_config(self):
         """延迟保存配置，避免频繁写文件"""
@@ -4407,12 +3602,6 @@ class MainWindow(QMainWindow):
             self.config_manager.set_window_position(window_id, pos.x(), pos.y(), size.width(), size.height())
             # 标记窗口为打开状态
             self.config_manager.set_window_is_open(window_id, True)
-            # 保存窗口锁定状态
-            self.config_manager.set_window_locked(window_id, window.is_locked)
-            # 保存窗口音量
-            self.config_manager.set_window_volume(window_id, window.volume)
-            # 保存窗口静音状态
-            self.config_manager.set_window_muted(window_id, window.is_muted)
         
         # 保存最小化到托盘设置
         self.config_manager.set_minimize_to_tray(self.minimize_to_tray_check.isChecked())
@@ -4468,14 +3657,8 @@ class MainWindow(QMainWindow):
                     window = VideoWindow(window_id)
                     window.clicked.connect(self.on_video_window_clicked)
                     window.window_closed.connect(self.on_video_window_closed)
-                    window.config_manager = self.config_manager  # 注入配置管理器
                     window.set_media_files(media_files)
-                    # 恢复窗口音量（优先使用窗口自身保存的音量）
-                    saved_volume = self.config_manager.get_window_volume(window_id)
-                    window.set_volume(saved_volume)
-                    # 恢复窗口静音状态（is_muted会在play时通过_safe_apply_volume自动应用）
-                    if self.config_manager.get_window_muted(window_id):
-                        window.is_muted = True
+                    window.set_volume(self.volume_slider.value())
                     window.set_position(pos.get("x", 100), pos.get("y", 100), 
                                         pos.get("width", 800), pos.get("height", 600))
                     window.show()
@@ -4493,10 +3676,6 @@ class MainWindow(QMainWindow):
                         window.play(default_media)
                     elif media_files:
                         window.play(media_files[0])
-                    
-                    # 恢复窗口锁定状态
-                    if self.config_manager.get_window_locked(window_id):
-                        window.lock()
                     
                     self.log(f"窗口{window_id}已自动恢复")
 
