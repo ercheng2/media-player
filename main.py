@@ -1209,11 +1209,13 @@ class VideoWindow(QFrame):
         """将PPT转换为图片列表，返回图片路径列表"""
         import hashlib
         import subprocess
+        import tempfile
         import fitz
         
-        # 生成缓存目录
+        # 生成缓存目录（使用系统临时目录，Windows下为%TEMP%，Linux下为/tmp）
         file_hash = hashlib.md5(open(ppt_path, 'rb').read()).hexdigest()[:8]
-        cache_dir = f"/tmp/ppt_slides/{file_hash}"
+        temp_dir = tempfile.gettempdir()
+        cache_dir = os.path.join(temp_dir, f"ppt_slides_{file_hash}")
         
         # 如果已有缓存，直接返回
         if os.path.exists(cache_dir) and os.listdir(cache_dir):
@@ -1234,6 +1236,24 @@ class VideoWindow(QFrame):
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
+        import time
+        
+        # ========== 清理之前残留的 PowerPoint 进程 ==========
+        # 有些系统PowerPoint进程没彻底退出，会锁住文件
+        # 尝试强制结束所有 PowerPoint 进程（最多等3秒）
+        for _ in range(6):
+            try:
+                subprocess.run(
+                    ['taskkill', '/F', '/IM', 'POWERPNT.EXE'],
+                    capture_output=True, timeout=3
+                )
+            except:
+                pass
+            time.sleep(0.5)
+        
+        # 定义MsoTriState常量
+        msoFalse = 0  # 不保存更改
+        
         # 方案1：win32com（pywin32，最稳定）
         try:
             import win32com.client
@@ -1251,16 +1271,28 @@ class VideoWindow(QFrame):
                 abs_path = os.path.abspath(ppt_path)
                 abs_cache = os.path.abspath(cache_dir)
                 
-                presentation = powerpoint.Presentations.Open(
-                    abs_path,
-                    WithWindow=False,
-                    ReadOnly=True
-                )
+                # 打开PPT时捕获异常，防止文件被锁
+                try:
+                    presentation = powerpoint.Presentations.Open(
+                        abs_path,
+                        WithWindow=False,
+                        ReadOnly=True
+                    )
+                except Exception as open_err:
+                    print(f"打开PPT文件失败: {open_err}")
+                    raise
                 
-                # 导出为PNG图片（ppShapeFormat=2表示PNG）
-                # Export参数: Path, Filter, ScaleWidth, ScaleHeight
+                # 导出为PNG图片
                 presentation.Export(abs_cache, "PNG")
-                presentation.Close()
+                
+                # 关闭时必须用MsoTriState，而不是布尔值
+                try:
+                    presentation.Close(msoFalse)  # msoFalse=0, 不保存更改
+                except:
+                    try:
+                        presentation.Close(False)
+                    except:
+                        pass
                 
                 # 收集导出的图片
                 images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
@@ -1281,6 +1313,15 @@ class VideoWindow(QFrame):
         try:
             import comtypes.client
             import pythoncom
+            
+            # 清理之前的PowerPoint进程
+            for _ in range(3):
+                try:
+                    subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], capture_output=True, timeout=2)
+                except:
+                    pass
+                time.sleep(0.3)
+            
             pythoncom.CoInitialize()
             
             try:
@@ -1299,7 +1340,12 @@ class VideoWindow(QFrame):
                 )
                 
                 presentation.Export(abs_cache, "PNG")
-                presentation.Close()
+                
+                try:
+                    presentation.Close(msoFalse)
+                except:
+                    presentation.Close(False)
+                
                 powerpoint.Quit()
                 
                 pythoncom.CoUninitialize()
@@ -1325,6 +1371,15 @@ class VideoWindow(QFrame):
         """LibreOffice方案转换PPT"""
         import subprocess
         import fitz
+        import shutil
+        
+        # 在转换前清理旧缓存（确保干净的目录）
+        if os.path.exists(cache_dir):
+            try:
+                shutil.rmtree(cache_dir)
+            except:
+                pass
+        os.makedirs(cache_dir, exist_ok=True)
         
         # 检查LibreOffice
         soffice = None
