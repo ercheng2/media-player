@@ -1211,6 +1211,7 @@ class VideoWindow(QFrame):
         import subprocess
         import tempfile
         import fitz
+        print(f"[PPT] 开始转换: {ppt_path}")
         
         # 生成缓存目录（使用系统临时目录，Windows下为%TEMP%，Linux下为/tmp）
         file_hash = hashlib.md5(open(ppt_path, 'rb').read()).hexdigest()[:8]
@@ -1232,7 +1233,13 @@ class VideoWindow(QFrame):
                 return images
         
         # 回退到LibreOffice方案
-        return self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
+        print("[PPT] COM方案返回None，尝试LibreOffice...")
+        result = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
+        if result:
+            print(f"[PPT] LibreOffice成功，{len(result)}张图片")
+        else:
+            print("[PPT] LibreOffice也失败，返回None")
+        return result
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
@@ -1297,9 +1304,11 @@ class VideoWindow(QFrame):
                 # 收集导出的图片
                 images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
                 if images:
+                    print(f"[PPT] win32com成功，{len(images)}张图片，路径: {images[0]}")
                     return images
+                print("[PPT] win32com: 收集图片为空")
             except Exception as e:
-                print(f"win32com PowerPoint转换失败: {e}")
+                print(f"[PPT] win32com异常: {type(e).__name__}: {e}")
             finally:
                 try:
                     powerpoint.Quit()
@@ -1501,7 +1510,21 @@ class VideoWindow(QFrame):
                     else:
                         self.error.emit("PPT转换失败，请检查是否安装了Office或LibreOffice")
                 except Exception as e:
-                    self.error.emit(f"PPT转换出错: {str(e)}")
+                    # 诊断：构建详细错误信息
+                    err_details = []
+                    err_details.append(type(e).__name__)
+                    if str(e).strip():
+                        err_details.append(str(e))
+                    if e.args:
+                        err_details.append("args:" + repr(e.args))
+                    # 检查COM异常属性
+                    for attr in ['hresult', 'text', 'strerror', 'reason']:
+                        if hasattr(e, attr):
+                            val = getattr(e, attr)
+                            if val:
+                                err_details.append(f"{attr}={val}")
+                    err_msg = " | ".join(err_details)
+                    self.error.emit("PPT转换出错: " + err_msg)
         
         self._ppt_convert_thread = PPTConvertThread(self, ppt_path_ref)
         self._ppt_convert_thread.finished.connect(self._on_ppt_converted)
