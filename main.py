@@ -1210,16 +1210,13 @@ class VideoWindow(QFrame):
         import hashlib
         import subprocess
         import tempfile
-        import fitz
+        import shutil
         print(f"[PPT] 开始转换: {ppt_path}")
         
-        # 生成缓存目录（使用系统临时目录，Windows下为%TEMP%，Linux下为/tmp）
+        # 生成缓存目录
         try:
             with open(ppt_path, 'rb') as f:
                 file_hash = hashlib.md5(f.read()).hexdigest()[:8]
-        except MemoryError:
-            print("[PPT] MemoryError: 读取文件计算哈希时内存不足")
-            raise
         except Exception as e:
             print(f"[PPT] 读取文件失败: {e}")
             return None
@@ -1228,7 +1225,7 @@ class VideoWindow(QFrame):
         cache_dir = os.path.join(temp_dir, f"ppt_slides_{file_hash}")
         print(f"[PPT] 缓存目录: {cache_dir}")
         
-        # 如果已有缓存，直接返回（检查是否有PNG文件）
+        # 检查缓存
         if os.path.exists(cache_dir):
             try:
                 cache_files = os.listdir(cache_dir)
@@ -1239,31 +1236,117 @@ class VideoWindow(QFrame):
                         return images
                     else:
                         print(f"[PPT] 缓存目录存在但无PNG文件，清空重新转换")
-                        # 缓存目录存在但没有PNG，清理后重新转换
-                        import shutil
-                        try:
-                            shutil.rmtree(cache_dir)
-                        except:
-                            pass
+                        shutil.rmtree(cache_dir)
             except Exception as e:
                 print(f"[PPT] 检查缓存失败: {e}")
         
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Windows优先用PowerPoint COM自动化
+        # 方案1：尝试使用python-pptx提取图片（不依赖Office）
+        images = self._convert_ppt_with_pptx(ppt_path, cache_dir)
+        if images and len(images) > 0:
+            return images
+        
+        # 方案2：Windows下用PowerPoint COM
         if platform.system() == 'Windows':
             images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
             if images is not None and len(images) > 0:
                 return images
         
-        # 回退到LibreOffice方案
-        print("[PPT] COM方案返回None，尝试LibreOffice...")
+        # 方案3：LibreOffice方案
+        print("[PPT] COM方案失败，尝试LibreOffice...")
         result = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
         if result:
             print(f"[PPT] LibreOffice成功，{len(result)}张图片")
-        else:
-            print("[PPT] LibreOffice也失败，返回None")
         return result
+    
+    def _convert_ppt_with_pptx(self, ppt_path, cache_dir):
+        """使用python-pptx提取PPT中的图片（不依赖Office COM）"""
+        try:
+            from pptx import Presentation
+            from PIL import Image
+            import io
+            
+            print(f"[PPT] 尝试使用python-pptx提取图片...")
+            prs = Presentation(ppt_path)
+            images = []
+            
+            for slide_num, slide in enumerate(prs.slides, 1):
+                slide_images = []
+                for shape in slide.shapes:
+                    if hasattr(shape, 'image'):
+                        try:
+                            img = shape.image
+                            img_bytes = img.blob
+                            img_ext = img.ext
+                            
+                            # 转为PNG格式保存
+                            img_name = f"slide_{slide_num:03d}_shape_{len(slide_images):03d}.png"
+                            img_path = os.path.join(cache_dir, img_name)
+                            
+                            # PIL处理
+                            pil_img = Image.open(io.BytesIO(img_bytes))
+                            if pil_img.mode in ('RGBA', 'P'):
+                                pil_img = pil_img.convert('RGB')
+                            pil_img.save(img_path, 'PNG')
+                            slide_images.append(img_path)
+                            print(f"[PPT] 第{slide_num}页提取到{len(slide_images)}个图片")
+                        except Exception as img_err:
+                            print(f"[PPT] 提取图片失败: {img_err}")
+                            continue
+                
+                # 如果幻灯片没有图片，创建空白图片占位
+                if not slide_images:
+                    blank_path = os.path.join(cache_dir, f"slide_{slide_num:03d}.png")
+                    # 获取幻灯片尺寸
+                    slide_width = prs.slide_width
+                    slide_height = prs.slide_height
+                    # 创建白色背景图
+                    blank_img = Image.new('RGB', (int(slide_width/914400), int(slide_height/914400)), 'white')
+                    blank_img.save(blank_path, 'PNG')
+                    images.append(blank_path)
+                    print(f"[PPT] 第{slide_num}页无图片，创建空白占位")
+                else:
+                    # 合并所有图片为一张（垂直拼接）
+                    if len(slide_images) == 1:
+                        images.append(slide_images[0])
+                    else:
+                        merged_path = os.path.join(cache_dir, f"slide_{slide_num:03d}.png")
+                        self._merge_images_vertical(slide_images, merged_path)
+                        images.append(merged_path)
+            
+            if images:
+                print(f"[PPT] python-pptx成功提取{len(images)}张幻灯片")
+            return images
+            
+        except ImportError:
+            print("[PPT] python-pptx未安装，跳过")
+        except Exception as e:
+            print(f"[PPT] python-pptx方案失败: {e}")
+        return None
+    
+    def _merge_images_vertical(self, image_paths, output_path):
+        """垂直拼接多张图片"""
+        try:
+            from PIL import Image
+            images = [Image.open(p) for p in image_paths]
+            widths, heights = zip(*(i.size for i in images))
+            total_height = sum(heights)
+            max_width = max(widths)
+            
+            merged = Image.new('RGB', (max_width, total_height), 'white')
+            y_offset = 0
+            for img in images:
+                merged.paste(img, (0, y_offset))
+                y_offset += img.height
+            
+            merged.save(output_path, 'PNG')
+        except Exception as e:
+            print(f"[PPT] 合并图片失败: {e}")
+            # 失败时保留第一张
+            if image_paths:
+                import shutil
+                shutil.copy(image_paths[0], output_path)
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
