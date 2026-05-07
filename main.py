@@ -63,6 +63,8 @@ import base64
 import re
 from datetime import datetime, timedelta
 import ctypes
+import shutil
+import tempfile
 if platform.system() == 'Windows':
     from ctypes import windll, c_void_p, c_int, byref, Structure, POINTER
     import ctypes.wintypes as wintypes
@@ -1237,6 +1239,21 @@ class VideoWindow(QFrame):
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
         import time
+
+
+        # ========== 关键修复：复制PPT到唯一临时文件再处理 ==========
+        # 避免PowerPoint锁定原文件或缓存文件，导致再次打开失败
+        temp_ppt_copy = None
+        try:
+            temp_ppt_copy = os.path.join(tempfile.gettempdir(), "ppt_src_" + uuid.uuid4().hex[:8] + ".pptx")
+            shutil.copy2(ppt_path, temp_ppt_copy)
+            ppt_to_open = temp_ppt_copy
+        except Exception as e:
+            print("复制PPT到临时目录失败: " + str(e))
+            ppt_to_open = ppt_path
+
+        abs_cache = os.path.abspath(cache_dir)
+        abs_path = os.path.abspath(ppt_to_open)
         
         # ========== 清理之前残留的 PowerPoint 进程 ==========
         # 有些系统PowerPoint进程没彻底退出，会锁住文件
@@ -1268,7 +1285,7 @@ class VideoWindow(QFrame):
                 except:
                     pass
                 
-                abs_path = os.path.abspath(ppt_path)
+                abs_path = os.path.abspath(ppt_to_open)
                 abs_cache = os.path.abspath(cache_dir)
                 
                 # 打开PPT时捕获异常，防止文件被锁
@@ -1331,7 +1348,7 @@ class VideoWindow(QFrame):
                 except:
                     pass
                 
-                abs_path = os.path.abspath(ppt_path)
+                abs_path = os.path.abspath(ppt_to_open)
                 abs_cache = os.path.abspath(cache_dir)
                 
                 presentation = powerpoint.Presentations.Open(
