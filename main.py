@@ -140,7 +140,7 @@ WINDOW_TCP_PORTS = [8892, 8893, 8894, 8895]
 
 # 授权相关
 TRIAL_DAYS = 30
-LICENSE_FILE = "license.dat"
+LICENSE_FILE = os.path.join("D:", os.sep, "xiongdi", "license.dat")
 MACHINE_CODE_FILE = "machine_code.dat"
 
 # 配置文件路径
@@ -404,6 +404,7 @@ class LicenseManager:
     def _save_encrypted_data(data_dict):
         """加密保存数据到license.dat"""
         try:
+            os.makedirs(os.path.dirname(LICENSE_FILE), exist_ok=True)
             json_str = json.dumps(data_dict, sort_keys=True)
             encrypted = LicenseManager._xor_crypt(json_str.encode('utf-8'), LicenseManager._SECRET_KEY)
             encoded = base64.b64encode(encrypted).decode('utf-8')
