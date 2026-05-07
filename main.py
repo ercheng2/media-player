@@ -1731,16 +1731,16 @@ class VideoWindow(QFrame):
         return geometry.x(), geometry.y(), geometry.width(), geometry.height()
     
     def hide_window(self):
-        """隐藏窗口（视频继续播放）"""
+        """隐藏窗口（停止播放+不可见）"""
+        self.stop()
         self.hide()
         self.is_visible = False
     
     def show_window(self):
-        """显示窗口"""
+        """显示窗口（可见+开始播放）"""
         self.show()
         self.is_visible = True
-
-
+        self.play()
 # ============== 网络通信类 ==============
 
 class NetworkManager(QThread):
