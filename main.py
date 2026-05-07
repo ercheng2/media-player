@@ -4148,25 +4148,7 @@ class MainWindow(QMainWindow):
             self.tray_icon.hide()
             
             # 清理Office进程，防止残留导致下次启动失败
-            import subprocess
-            import time
-            if platform.system() == 'Windows':
-                # 强制结束 PowerPoint 进程
-                for _ in range(3):
-                    try:
-                        subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], 
-                                       capture_output=True, timeout=3)
-                    except:
-                        pass
-                    time.sleep(0.3)
-                # 强制结束 LibreOffice 进程
-                for _ in range(3):
-                    try:
-                        subprocess.run(['taskkill', '/F', '/IM', 'soffice.exe'], 
-                                       capture_output=True, timeout=3)
-                    except:
-                        pass
-                    time.sleep(0.3)
+            self._kill_office_processes()
             
             event.accept()
         else:
@@ -4190,27 +4172,25 @@ class MainWindow(QMainWindow):
         self.tray_icon.hide()
         
         # 清理Office进程，防止残留导致下次启动失败
-        import subprocess
-        import time
-        if platform.system() == 'Windows':
-            # 强制结束 PowerPoint 进程
-            for _ in range(3):
-                try:
-                    subprocess.run(['taskkill', '/F', '/IM', 'POWERPNT.EXE'], 
-                                   capture_output=True, timeout=3)
-                except:
-                    pass
-                time.sleep(0.3)
-            # 强制结束 LibreOffice 进程
-            for _ in range(3):
-                try:
-                    subprocess.run(['taskkill', '/F', '/IM', 'soffice.exe'], 
-                                   capture_output=True, timeout=3)
-                except:
-                    pass
-                time.sleep(0.3)
+        self._kill_office_processes()
         
         QApplication.quit()
+    
+    def _kill_office_processes(self):
+        """清理Office进程（使用ctypes避免cmd窗口闪烁）"""
+        import ctypes
+        if platform.system() == 'Windows':
+            # 使用ctypes.windll调用taskkill，避免弹出cmd窗口
+            for proc_name in ['POWERPNT.EXE', 'soffice.exe']:
+                try:
+                    # /F 强制结束 /IM 指定进程名 /T 包括子进程
+                    ctypes.windll.shell32.ShellExecuteW(
+                        None, "runas", "taskkill", 
+                        f'/F /IM {proc_name}', 
+                        None, 0  # SW_HIDE = 0
+                    )
+                except:
+                    pass
     
     def _schedule_save_config(self):
         """延迟保存配置，避免频繁写文件"""
