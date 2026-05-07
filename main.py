@@ -1224,19 +1224,27 @@ class VideoWindow(QFrame):
         
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Windows下尝试WPS或Office COM自动化
+        # Windows下方案顺序：LibreOffice(最稳) → WPS → PowerPoint
         if platform.system() == 'Windows':
-            # 先尝试WPS
+            # 方案1：LibreOffice（最稳定，不依赖Office COM）
+            images = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
+            if images is not None:
+                return images
+            
+            # 方案2：WPS COM
             images = self._convert_ppt_with_wps(ppt_path, cache_dir)
             if images is not None:
                 return images
-            # 再尝试PowerPoint
+            
+            # 方案3：PowerPoint COM
             images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
             if images is not None:
                 return images
-        
-        # 回退到LibreOffice方案
-        return self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
+            
+            return None
+        else:
+            # Linux/Mac直接用LibreOffice
+            return self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
     
     def _convert_ppt_with_wps(self, ppt_path, cache_dir):
         """Windows下用WPS转换PPT为图片"""
