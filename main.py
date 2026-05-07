@@ -1247,8 +1247,13 @@ class VideoWindow(QFrame):
         if images and len(images) > 0:
             return images
         
-        # 方案2：Windows下用PowerPoint COM
+        # 方案2：Windows下用WPS/Office COM
         if platform.system() == 'Windows':
+            # 先尝试WPS
+            images = self._convert_ppt_with_wps(ppt_path, cache_dir)
+            if images is not None and len(images) > 0:
+                return images
+            # 再尝试Office PowerPoint
             images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
             if images is not None and len(images) > 0:
                 return images
@@ -1347,6 +1352,71 @@ class VideoWindow(QFrame):
             if image_paths:
                 import shutil
                 shutil.copy(image_paths[0], output_path)
+    
+    def _convert_ppt_with_wps(self, ppt_path, cache_dir):
+        """Windows下用WPS转换PPT为图片"""
+        import time
+        
+        # 清理之前残留的WPS进程
+        for _ in range(3):
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', 'et.exe'], capture_output=True, timeout=2)
+            except:
+                pass
+            time.sleep(0.2)
+        
+        # 尝试WPS的ET.Application（表格应用，但可以打开PPT）
+        try:
+            import win32com.client
+            import pythoncom
+            pythoncom.CoInitialize()
+            
+            try:
+                # WPS的ProgID
+                wps = win32com.client.Dispatch("WPS.Application")
+            except:
+                try:
+                    wps = win32com.client.Dispatch("WPP.Application")  # WPS演示
+                except:
+                    wps = None
+            
+            if wps is None:
+                pythoncom.CoUninitialize()
+                return None
+            
+            wps.Visible = False
+            
+            abs_path = os.path.abspath(ppt_path)
+            abs_cache = os.path.abspath(cache_dir)
+            
+            # 打开PPT
+            presentation = wps.Presentations.Open(abs_path, False, True, False)
+            
+            # 导出为PNG
+            presentation.Export(abs_cache, "PNG")
+            
+            # 关闭
+            presentation.Close()
+            wps.Quit()
+            
+            pythoncom.CoUninitialize()
+            
+            # 收集图片
+            images = sorted([os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.lower().endswith('.png')])
+            if images:
+                print(f"[PPT] WPS成功，{len(images)}张图片")
+                return images
+                
+        except ImportError:
+            print("[PPT] win32com未安装")
+        except Exception as e:
+            print(f"[PPT] WPS方案失败: {e}")
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+        
+        return None
     
     def _convert_ppt_with_comtypes(self, ppt_path, cache_dir):
         """Windows下用PowerPoint COM转换PPT为图片（优先win32com，其次comtypes）"""
