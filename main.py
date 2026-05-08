@@ -1224,20 +1224,20 @@ class VideoWindow(QFrame):
         
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Windows下方案顺序：LibreOffice(最稳) → WPS → PowerPoint
+        # Windows下方案顺序：WPS → PowerPoint → LibreOffice
         if platform.system() == 'Windows':
-            # 方案1：LibreOffice（最稳定，不依赖Office COM）
-            images = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
-            if images is not None:
-                return images
-            
-            # 方案2：WPS COM
+            # 方案1：WPS COM（最快，直接导出PNG）
             images = self._convert_ppt_with_wps(ppt_path, cache_dir)
             if images is not None:
                 return images
             
-            # 方案3：PowerPoint COM
+            # 方案2：PowerPoint COM
             images = self._convert_ppt_with_comtypes(ppt_path, cache_dir)
+            if images is not None:
+                return images
+            
+            # 方案3：LibreOffice（最稳但最慢）
+            images = self._convert_ppt_with_libreoffice(ppt_path, cache_dir)
             if images is not None:
                 return images
             
